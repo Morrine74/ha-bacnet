@@ -8,11 +8,11 @@ Lovelace resource manually.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 
 from homeassistant.core import HomeAssistant
+from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 
@@ -26,13 +26,17 @@ _LOVELACE_DIR = os.path.join(os.path.dirname(__file__), "lovelace")
 _REGISTERED_KEY = f"{DOMAIN}_frontend_registered"
 
 
-def _integration_version() -> str:
-    """Read the integration version from manifest.json for cache busting."""
+async def _async_integration_version(hass: HomeAssistant) -> str:
+    """Return the integration version without blocking the event loop.
+
+    The version is read from the already-loaded integration metadata instead of
+    opening manifest.json directly (which would be blocking file I/O).
+    """
     try:
-        manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
-        with open(manifest_path, encoding="utf-8") as handle:
-            return json.load(handle).get("version", "0")
-    except (OSError, ValueError):
+        integration = await async_get_integration(hass, DOMAIN)
+        return str(integration.version or "0")
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Could not resolve integration version: %s", err)
         return "0"
 
 
@@ -42,14 +46,15 @@ async def async_register_card(hass: HomeAssistant) -> None:
         return
 
     card_path = os.path.join(_LOVELACE_DIR, CARD_FILENAME)
-    if not os.path.isfile(card_path):
+    if not await hass.async_add_executor_job(os.path.isfile, card_path):
         _LOGGER.warning("Lovelace card file missing at %s", card_path)
         return
 
     await _async_serve_card(hass, card_path)
 
     # Append a version query string so browsers reload the card after upgrades.
-    versioned_url = f"{CARD_URL_PATH}?v={_integration_version()}"
+    version = await _async_integration_version(hass)
+    versioned_url = f"{CARD_URL_PATH}?v={version}"
     _add_extra_module(hass, versioned_url)
 
     hass.data[_REGISTERED_KEY] = True
