@@ -3,6 +3,7 @@
   "name": "BACnet",
   "codeowners": [],
   "config_flow": true,
+  "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/Morrine74/ha-bacnet",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Morrine74/ha-bacnet/issues",
