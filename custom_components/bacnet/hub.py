@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from .const import DEFAULT_REQUEST_TIMEOUT
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -226,11 +228,19 @@ class BACnetHub:
 
         app = self._require_app()
         try:
-            result = await app.read_property(
-                Address(address),
-                ObjectIdentifier("device,4194303"),
-                "object-identifier",
+            result = await asyncio.wait_for(
+                app.read_property(
+                    Address(address),
+                    ObjectIdentifier("device,4194303"),
+                    "object-identifier",
+                ),
+                timeout=DEFAULT_REQUEST_TIMEOUT,
             )
+        except asyncio.TimeoutError as err:
+            raise BACnetHubError(
+                f"Reading device instance at {address} timed out "
+                "(no decodable response)"
+            ) from err
         except Exception as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Could not read device instance at {address}: {err}"
@@ -257,12 +267,19 @@ class BACnetHub:
         app = self._require_app()
         obj_type, instance = self._parse_object_id(object_id)
         try:
-            return await app.read_property(
-                Address(address),
-                ObjectIdentifier(f"{obj_type},{instance}"),
-                prop,
-                array_index,
+            return await asyncio.wait_for(
+                app.read_property(
+                    Address(address),
+                    ObjectIdentifier(f"{obj_type},{instance}"),
+                    prop,
+                    array_index,
+                ),
+                timeout=DEFAULT_REQUEST_TIMEOUT,
             )
+        except asyncio.TimeoutError as err:
+            raise BACnetHubError(
+                f"Read {prop} of {object_id}@{address} timed out"
+            ) from err
         except Exception as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Read {prop} of {object_id}@{address} failed: {err}"
@@ -291,14 +308,21 @@ class BACnetHub:
         app = self._require_app()
         obj_type, instance = self._parse_object_id(object_id)
         try:
-            await app.write_property(
-                Address(address),
-                ObjectIdentifier(f"{obj_type},{instance}"),
-                prop,
-                value,
-                array_index,
-                priority,
+            await asyncio.wait_for(
+                app.write_property(
+                    Address(address),
+                    ObjectIdentifier(f"{obj_type},{instance}"),
+                    prop,
+                    value,
+                    array_index,
+                    priority,
+                ),
+                timeout=DEFAULT_REQUEST_TIMEOUT,
             )
+        except asyncio.TimeoutError as err:
+            raise BACnetHubError(
+                f"Write {prop} of {object_id}@{address} timed out"
+            ) from err
         except Exception as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Write {prop} of {object_id}@{address} failed: {err}"

@@ -39,6 +39,9 @@ DEFAULT_COV_LIFETIME: Final = 300
 DEFAULT_WRITE_PRIORITY: Final = 16
 DEFAULT_BBMD_TTL: Final = 30
 DEFAULT_DISCOVERY_TIMEOUT: Final = 5
+# Hard cap (seconds) on any single read/write request so a non-decodable or
+# lost response can never hang the integration forever.
+DEFAULT_REQUEST_TIMEOUT: Final = 10
 
 MIN_SCAN_INTERVAL: Final = 5
 MIN_WRITE_PRIORITY: Final = 1
