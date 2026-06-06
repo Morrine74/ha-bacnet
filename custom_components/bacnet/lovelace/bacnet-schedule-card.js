@@ -84,9 +84,12 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.device_address || !config.object_id) {
-      throw new Error("device_address and object_id are required");
-    }
+    // Do not throw when required fields are missing: the Lovelace card picker
+    // instantiates the card with an empty config to render a preview, and a
+    // hard throw there leaves the preview spinning forever. Instead we remember
+    // that the card is not configured and render a friendly hint.
+    config = config || {};
+    this._configured = Boolean(config.device_address && config.object_id);
     this._config = {
       title: "BACnet Schedule",
       resolution: 30,
@@ -102,13 +105,27 @@ class BacnetScheduleCard extends HTMLElement {
     this._slots = (24 * 60) / Number(this._config.resolution);
     this._activeStateIndex = 0;
     this._grid = this._emptyGrid();
-    this._renderShell();
+    if (this._configured) {
+      this._renderShell();
+    } else {
+      this._renderUnconfigured();
+    }
+  }
+
+  static getStubConfig() {
+    // Sample configuration used by the card picker preview.
+    return {
+      device_address: "192.168.0.99",
+      object_id: "schedule,1",
+      title: "BACnet Schedule",
+      resolution: 30,
+    };
   }
 
   set hass(hass) {
     const first = this._hass === undefined;
     this._hass = hass;
-    if (first) {
+    if (first && this._configured) {
       this._loadSchedule();
     }
   }
@@ -405,6 +422,22 @@ class BacnetScheduleCard extends HTMLElement {
     cell.title = this._labelForValue(value);
   }
 
+  _renderUnconfigured() {
+    this.shadowRoot.innerHTML = `
+      <style>${STYLE}</style>
+      <ha-card>
+        <div class="head"><h2>BACnet Schedule</h2></div>
+        <div class="status info">
+          Set <code>device_address</code> and <code>object_id</code> to edit a
+          BACnet schedule, e.g.:
+        </div>
+        <pre class="hint-code">type: custom:bacnet-schedule-card
+device_address: "192.168.0.99"
+object_id: "schedule,1"</pre>
+      </ha-card>
+    `;
+  }
+
   _renderShell() {
     this.shadowRoot.innerHTML = `
       <style>${STYLE}</style>
@@ -650,18 +683,28 @@ const STYLE = `
     padding: 7px 8px; border-radius: 6px; font-size: 0.83rem; text-align: left;
     color: var(--primary-text-color, #212121);
   }
-  .ctx-item:hover { background: var(--secondary-background-color, #f0f0f0); }
-  .ctx-item[disabled] { opacity: 0.4; pointer-events: none; }
-  .ctx-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.12); }
-  .ctx-sep { height: 1px; background: var(--divider-color, #eee); margin: 4px 0; }
+  .hint-code {
+    margin: 8px 0 0; padding: 10px 12px; border-radius: 8px;
+    background: var(--secondary-background-color, #f5f5f5);
+    color: var(--primary-text-color, #212121);
+    font-size: 0.78rem; white-space: pre-wrap; overflow-x: auto;
+  }
 `;
 
-customElements.define("bacnet-schedule-card", BacnetScheduleCard);
+// Guard against double definition (the versioned ?v= URL may load the module
+// more than once); defining a custom element twice throws and would break the
+// card. Only register the picker entry on first load too.
+if (!customElements.get("bacnet-schedule-card")) {
+  customElements.define("bacnet-schedule-card", BacnetScheduleCard);
 
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "bacnet-schedule-card",
-  name: "BACnet Schedule Card",
-  description:
-    "Graphical weekly-schedule editor for BACnet schedule objects (days × hours grid, pastel states, right-click actions).",
-});
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "bacnet-schedule-card",
+    name: "BACnet Schedule Card",
+    description:
+      "Graphical weekly-schedule editor for BACnet schedule objects (days × hours grid, pastel states, right-click actions).",
+    preview: false,
+    documentationURL: "https://github.com/Morrine74/ha-bacnet",
+  });
+}
+
