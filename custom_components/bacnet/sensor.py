@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import BACnetConfigEntry
 from .const import ANALOG_TYPES, MULTI_STATE_TYPES, WRITABLE_TYPES
 from .entity import BACnetEntity
+from .units import map_unit
 
 
 async def async_setup_entry(
@@ -31,6 +32,13 @@ async def async_setup_entry(
 
 class BACnetSensor(BACnetEntity, SensorEntity):
     """A read-only BACnet analog or multi-state input."""
+
+    def __init__(self, coordinator, device, point) -> None:
+        """Resolve the engineering unit and device class from BACnet metadata."""
+        super().__init__(coordinator, device, point)
+        unit, device_class = map_unit(point.units)
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
 
     @property
     def native_value(self):

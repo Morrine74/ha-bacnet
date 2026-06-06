@@ -13,11 +13,15 @@ def test_point_config_round_trip():
         use_cov=True,
         cov_lifetime=120,
         write_priority=8,
+        units="degrees-celsius",
+        description="Room setpoint",
     )
     restored = models.PointConfig.from_dict(point.to_dict())
     assert restored == point
     assert restored.object_id == "analog-value,7"
     assert restored.writable is True
+    assert restored.units == "degrees-celsius"
+    assert restored.description == "Room setpoint"
 
 
 def test_point_config_read_only_type_not_writable():

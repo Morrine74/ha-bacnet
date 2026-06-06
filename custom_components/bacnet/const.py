@@ -25,6 +25,8 @@ CONF_OBJECT_NAME: Final = "object_name"
 CONF_USE_COV: Final = "use_cov"
 CONF_COV_LIFETIME: Final = "cov_lifetime"
 CONF_WRITE_PRIORITY: Final = "write_priority"
+CONF_UNITS: Final = "units"
+CONF_DESCRIPTION: Final = "description"
 
 # Defaults
 DEFAULT_LOCAL_OBJECT_ID: Final = 599

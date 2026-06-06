@@ -7,6 +7,7 @@ from typing import Any
 
 from .const import (
     CONF_COV_LIFETIME,
+    CONF_DESCRIPTION,
     CONF_DEVICE_ADDRESS,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
@@ -14,6 +15,7 @@ from .const import (
     CONF_OBJECT_NAME,
     CONF_OBJECT_TYPE,
     CONF_OBJECTS,
+    CONF_UNITS,
     CONF_USE_COV,
     CONF_WRITE_PRIORITY,
     DEFAULT_COV_LIFETIME,
@@ -32,6 +34,8 @@ class PointConfig:
     use_cov: bool = False
     cov_lifetime: int = DEFAULT_COV_LIFETIME
     write_priority: int = DEFAULT_WRITE_PRIORITY
+    units: str | None = None
+    description: str | None = None
 
     @property
     def object_id(self) -> str:
@@ -52,6 +56,8 @@ class PointConfig:
             CONF_USE_COV: self.use_cov,
             CONF_COV_LIFETIME: self.cov_lifetime,
             CONF_WRITE_PRIORITY: self.write_priority,
+            CONF_UNITS: self.units,
+            CONF_DESCRIPTION: self.description,
         }
 
     @classmethod
@@ -66,6 +72,8 @@ class PointConfig:
             write_priority=int(
                 data.get(CONF_WRITE_PRIORITY, DEFAULT_WRITE_PRIORITY)
             ),
+            units=data.get(CONF_UNITS),
+            description=data.get(CONF_DESCRIPTION),
         )
 
 

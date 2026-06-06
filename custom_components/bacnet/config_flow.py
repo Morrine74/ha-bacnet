@@ -301,6 +301,8 @@ class BACnetOptionsFlow(OptionsFlow):
                         use_cov=use_cov,
                         cov_lifetime=DEFAULT_COV_LIFETIME,
                         write_priority=priority,
+                        units=obj.units,
+                        description=obj.description,
                     )
                 )
             device.points = points

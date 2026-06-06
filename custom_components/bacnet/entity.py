@@ -57,10 +57,15 @@ class BACnetEntity(CoordinatorEntity[BACnetCoordinator]):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose BACnet metadata as entity attributes."""
-        return {
+        attrs: dict[str, Any] = {
             "device_id": self._device.device_id,
             "device_address": self._device.address,
             "object_id": self._point.object_id,
             "object_type": self._point.object_type,
             "cov": self._point.use_cov,
         }
+        if self._point.description:
+            attrs["description"] = self._point.description
+        if self._point.units:
+            attrs["bacnet_units"] = self._point.units
+        return attrs
