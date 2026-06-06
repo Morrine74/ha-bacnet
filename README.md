@@ -27,7 +27,7 @@ inside Home Assistant.
 | Foreign Device / BBMD registration | ✅ | Optional in setup |
 | Trend Logs | 🧪 | `bacnet.read_trend_log` service |
 | Schedules (weekly/exception) | 🧪 | `bacnet.read_schedule` / `bacnet.write_schedule` |
-| Graphical schedule editor | 🛠️ | Lovelace card (planned, see `www/`) |
+| Graphical schedule editor | ✅ | Lovelace card (`www/bacnet-schedule-card.js`) |
 | Alarms & events | 🧪 | `bacnet.acknowledge_alarm` service |
 | BACnet MS/TP (serial) | ⛔ | Planned |
 
@@ -88,6 +88,44 @@ data:
   value: 21.5
   priority: 8
 ```
+
+## Graphical schedule editor (Lovelace card)
+
+A custom Lovelace card renders a BACnet `schedule` object as an interactive
+**days × hours** grid with a soft pastel palette.
+
+- **Columns** = the 7 days of the week
+- **Rows** = the hours of the day (15 / 30 / 60 min resolution)
+- **Left click / drag** = paint the selected state
+- **Right click** = context menu (set a state, clear slot, **delete segment**,
+  fill the day, copy/paste a day)
+- **Save** writes the grid back through `bacnet.write_schedule`
+
+### Install the card
+
+1. Copy `www/bacnet-schedule-card.js` into your Home Assistant `config/www/`
+   folder (it is shipped with the repository).
+2. Add it as a Lovelace resource (**Settings → Dashboards → ⋮ → Resources**):
+
+   ```yaml
+   url: /local/bacnet-schedule-card.js
+   type: module
+   ```
+
+3. Add the card to a dashboard:
+
+   ```yaml
+   type: custom:bacnet-schedule-card
+   device_address: "192.168.1.50"
+   object_id: "schedule,1"
+   title: "AHU-1 Occupancy"
+   resolution: 30            # minutes per slot: 15 / 30 / 60
+   default_value: 0          # value used for "empty" slots
+   states:                   # optional, overrides the pastel defaults
+     - { label: "Occupied",   value: 1, color: "#BFE3C0" }
+     - { label: "Standby",    value: 2, color: "#FCE1B6" }
+     - { label: "Unoccupied", value: 0, color: "#E3EAF2" }
+   ```
 
 ## Development
 
