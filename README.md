@@ -27,7 +27,7 @@ inside Home Assistant.
 | Foreign Device / BBMD registration | ✅ | Optional in setup |
 | Trend Logs | 🧪 | `bacnet.read_trend_log` service |
 | Schedules (weekly/exception) | 🧪 | `bacnet.read_schedule` / `bacnet.write_schedule` |
-| Graphical schedule editor | ✅ | Lovelace card (`www/bacnet-schedule-card.js`) |
+| Graphical schedule editor | ✅ | Bundled Lovelace card (auto-registered) |
 | Alarms & events | 🧪 | `bacnet.acknowledge_alarm` service |
 | BACnet MS/TP (serial) | ⛔ | Planned |
 
@@ -111,29 +111,23 @@ A custom Lovelace card renders a BACnet `schedule` object as an interactive
 
 ### Install the card
 
-1. Copy `www/bacnet-schedule-card.js` into your Home Assistant `config/www/`
-   folder (it is shipped with the repository).
-2. Add it as a Lovelace resource (**Settings → Dashboards → ⋮ → Resources**):
+The card ships **inside** the integration and is registered automatically: once
+the BACnet integration is set up, Home Assistant serves the card and loads it as
+a frontend module — **no Lovelace resource to add manually**. Just add the card
+to a dashboard:
 
-   ```yaml
-   url: /local/bacnet-schedule-card.js
-   type: module
-   ```
-
-3. Add the card to a dashboard:
-
-   ```yaml
-   type: custom:bacnet-schedule-card
-   device_address: "192.168.1.50"
-   object_id: "schedule,1"
-   title: "AHU-1 Occupancy"
-   resolution: 30            # minutes per slot: 15 / 30 / 60
-   default_value: 0          # value used for "empty" slots
-   states:                   # optional, overrides the pastel defaults
-     - { label: "Occupied",   value: 1, color: "#BFE3C0" }
-     - { label: "Standby",    value: 2, color: "#FCE1B6" }
-     - { label: "Unoccupied", value: 0, color: "#E3EAF2" }
-   ```
+```yaml
+type: custom:bacnet-schedule-card
+device_address: "192.168.1.50"
+object_id: "schedule,1"
+title: "AHU-1 Occupancy"
+resolution: 30            # minutes per slot: 15 / 30 / 60
+default_value: 0          # value used for "empty" slots
+states:                   # optional, overrides the pastel defaults
+  - { label: "Occupied",   value: 1, color: "#BFE3C0" }
+  - { label: "Standby",    value: 2, color: "#FCE1B6" }
+  - { label: "Unoccupied", value: 0, color: "#E3EAF2" }
+```
 
 ## Development
 

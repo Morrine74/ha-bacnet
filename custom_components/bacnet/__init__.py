@@ -25,6 +25,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import BACnetCoordinator
+from .frontend import async_register_card
 from .hub import BACnetHub, BACnetHubError
 from .models import devices_from_options
 from .services import async_register_services, async_unregister_services
@@ -73,6 +74,10 @@ async def async_setup_entry(
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
+
+    # Serve and register the bundled Lovelace card so it is available without
+    # the user having to add a dashboard resource manually.
+    await async_register_card(hass)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
