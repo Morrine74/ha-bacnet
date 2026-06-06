@@ -25,6 +25,7 @@
         "title": "Options BACnet",
         "menu_options": {
           "discover": "Découvrir et ajouter un périphérique",
+          "add_by_ip": "Ajouter un périphérique par adresse IP",
           "settings": "Paramètres d'interrogation",
           "remove_device": "Supprimer un périphérique"
         }
@@ -32,6 +33,14 @@
       "discover": {
         "title": "Périphériques découverts",
         "data": { "device": "Périphérique" }
+      },
+      "add_by_ip": {
+        "title": "Ajouter un périphérique par IP",
+        "description": "Contacte un périphérique directement (unicast), sans passer par la découverte broadcast. Laissez l'instance vide pour la détecter automatiquement.",
+        "data": {
+          "address": "Adresse IP du périphérique (ex. 192.168.0.99)",
+          "device_id": "Instance du périphérique (optionnel)"
+        }
       },
       "select_points": {
         "title": "Sélection des points",
@@ -56,7 +65,8 @@
       "no_devices_found": "Aucun périphérique BACnet n'a répondu au Who-Is.",
       "no_objects_found": "Aucun objet trouvé sur le périphérique sélectionné.",
       "no_devices_configured": "Aucun périphérique configuré à supprimer.",
-      "discovery_failed": "Échec de la découverte. Vérifiez la configuration réseau."
+      "discovery_failed": "Échec de la découverte. Vérifiez la configuration réseau.",
+      "device_not_found": "Aucun périphérique n'a répondu à cette adresse IP."
     }
   }
 }

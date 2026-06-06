@@ -25,6 +25,7 @@
         "title": "BACnet options",
         "menu_options": {
           "discover": "Discover and add a device",
+          "add_by_ip": "Add a device by IP address",
           "settings": "Polling settings",
           "remove_device": "Remove a device"
         }
@@ -33,6 +34,14 @@
         "title": "Discovered devices",
         "data": {
           "device": "Device"
+        }
+      },
+      "add_by_ip": {
+        "title": "Add a device by IP",
+        "description": "Contact a device directly (unicast), bypassing broadcast discovery. Leave the device id empty to detect it automatically.",
+        "data": {
+          "address": "Device IP address (e.g. 192.168.0.99)",
+          "device_id": "Device instance (optional)"
         }
       },
       "select_points": {
@@ -62,7 +71,8 @@
       "no_devices_found": "No BACnet devices answered the Who-Is broadcast.",
       "no_objects_found": "No objects were found on the selected device.",
       "no_devices_configured": "There are no configured devices to remove.",
-      "discovery_failed": "Discovery failed. Check the network configuration."
+      "discovery_failed": "Discovery failed. Check the network configuration.",
+      "device_not_found": "No device responded at that IP address."
     }
   },
   "services": {

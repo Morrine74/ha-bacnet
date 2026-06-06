@@ -184,6 +184,14 @@ class BACnetHub:
             except Exception as err:  # noqa: BLE001
                 raise BACnetHubError(f"Who-Is failed: {err}") from err
 
+        _LOGGER.debug(
+            "Who-Is (dest=%s, low=%s, high=%s) returned %d response(s)",
+            address or "broadcast",
+            low_limit,
+            high_limit,
+            len(i_ams or []),
+        )
+
         devices: list[DiscoveredDevice] = []
         for i_am in i_ams or []:
             device_id = int(i_am.iAmDeviceIdentifier[1])
@@ -201,6 +209,36 @@ class BACnetHub:
                 )
             )
         return devices
+
+    async def async_read_device_instance(self, address: str) -> int | None:
+        """Read a device's object instance directly from its IP address.
+
+        Uses the BACnet wildcard device identifier (``device,4194303``) so the
+        device returns its own instance number. This works even when broadcast
+        discovery (Who-Is) does not reach Home Assistant, as long as the device
+        is reachable by unicast at ``address``.
+        """
+        from bacpypes3.pdu import Address
+        from bacpypes3.primitivedata import ObjectIdentifier
+
+        app = self._require_app()
+        try:
+            result = await app.read_property(
+                Address(address),
+                ObjectIdentifier("device,4194303"),
+                "object-identifier",
+            )
+        except Exception as err:  # noqa: BLE001
+            raise BACnetHubError(
+                f"Could not read device instance at {address}: {err}"
+            ) from err
+
+        try:
+            # result is an ObjectIdentifier ('device', instance).
+            return int(result[1])
+        except (TypeError, IndexError, ValueError):
+            _LOGGER.debug("Unexpected device identifier from %s: %r", address, result)
+            return None
 
     async def async_read_property(
         self,

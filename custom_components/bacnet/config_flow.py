@@ -142,7 +142,12 @@ class BACnetOptionsFlow(OptionsFlow):
         """Show the top-level options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["discover", "settings", "remove_device"],
+            menu_options=[
+                "discover",
+                "add_by_ip",
+                "settings",
+                "remove_device",
+            ],
         )
 
     async def async_step_settings(
@@ -202,6 +207,67 @@ class BACnetOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema({vol.Required("device"): vol.In(options)}),
+            errors=errors,
+        )
+
+    async def async_step_add_by_ip(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add a device by its IP address using a directed (unicast) Who-Is.
+
+        This bypasses broadcast issues (Docker/VM networking, multiple
+        interfaces, routed segments): the device is contacted directly, exactly
+        like a directed discovery in YABE.
+        """
+        hub = self._hub()
+        if hub is None or not hub.started:
+            return self.async_abort(reason="not_loaded")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            address = user_input["address"].strip()
+            manual_id = user_input.get("device_id")
+
+            device_id: int | None = (
+                int(manual_id) if manual_id not in (None, "") else None
+            )
+            try:
+                # Directed Who-Is first; fall back to reading the device id.
+                found = await hub.async_who_is(
+                    address=address, timeout=DEFAULT_DISCOVERY_TIMEOUT
+                )
+                if found:
+                    device_id = found[0].device_id
+                    address = found[0].address
+                elif device_id is None:
+                    device_id = await hub.async_read_device_instance(address)
+            except BACnetHubError:
+                errors["base"] = "discovery_failed"
+
+            if not errors and device_id is None:
+                errors["base"] = "device_not_found"
+
+            if not errors:
+                self._selected_device = DeviceConfig(
+                    device_id=int(device_id),
+                    address=address,
+                    name=f"BACnet Device {device_id}",
+                )
+                return await self.async_step_select_points()
+
+        return self.async_show_form(
+            step_id="add_by_ip",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "address",
+                        default=(user_input or {}).get("address", ""),
+                    ): str,
+                    vol.Optional("device_id"): vol.All(
+                        vol.Coerce(int), vol.Range(min=0, max=4194302)
+                    ),
+                }
+            ),
             errors=errors,
         )
 
