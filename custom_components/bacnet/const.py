@@ -100,6 +100,11 @@ WRITABLE_TYPES: Final = frozenset(
     }
 )
 
+# Object types that can be added as Home Assistant entities from the config flow.
+SELECTABLE_TYPES: Final = (
+    ANALOG_TYPES | BINARY_TYPES | MULTI_STATE_TYPES | frozenset({SCHEDULE})
+)
+
 # Services
 SERVICE_READ_PROPERTY: Final = "read_property"
 SERVICE_WRITE_PROPERTY: Final = "write_property"

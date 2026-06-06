@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BACnetConfigEntry
-from .const import ANALOG_TYPES, MULTI_STATE_TYPES, WRITABLE_TYPES
+from .const import ANALOG_TYPES, MULTI_STATE_TYPES, SCHEDULE, WRITABLE_TYPES
 from .entity import BACnetEntity
 from .units import map_unit
 
@@ -19,7 +19,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up BACnet sensors from a config entry."""
     coordinator = entry.runtime_data.coordinator
-    entities: list[BACnetSensor] = []
+    entities: list[SensorEntity] = []
     for device, point in coordinator.iter_points():
         is_analog = point.object_type in ANALOG_TYPES
         is_multistate = point.object_type in MULTI_STATE_TYPES
@@ -27,6 +27,8 @@ async def async_setup_entry(
         # number/switch/select platforms instead.
         if (is_analog or is_multistate) and point.object_type not in WRITABLE_TYPES:
             entities.append(BACnetSensor(coordinator, device, point))
+        elif point.object_type == SCHEDULE:
+            entities.append(BACnetScheduleSensor(coordinator, device, point))
     async_add_entities(entities)
 
 
@@ -59,3 +61,20 @@ class BACnetSensor(BACnetEntity, SensorEntity):
         if self._point.object_type in ANALOG_TYPES:
             return SensorStateClass.MEASUREMENT
         return None
+
+
+class BACnetScheduleSensor(BACnetEntity, SensorEntity):
+    """A BACnet Schedule object, exposed via its current active value.
+
+    The state is the schedule's present value (the value currently in effect).
+    The graphical schedule card edits the same object directly by its
+    ``device_address`` and ``object_id``.
+    """
+
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def native_value(self):
+        """Return the schedule's present (active) value."""
+        return self.native_raw_value
+
