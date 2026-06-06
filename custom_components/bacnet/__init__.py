@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_BBMD_ADDRESS,
@@ -22,6 +23,7 @@ from .const import (
     DEFAULT_LOCAL_OBJECT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MANUFACTURER,
     PLATFORMS,
 )
 from .coordinator import BACnetCoordinator
@@ -72,6 +74,8 @@ async def async_setup_entry(
 
     entry.runtime_data = BACnetRuntimeData(hub=hub, coordinator=coordinator)
 
+    _async_register_hub_device(hass, entry)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
 
@@ -81,6 +85,28 @@ async def async_setup_entry(
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+def _async_register_hub_device(
+    hass: HomeAssistant, entry: BACnetConfigEntry
+) -> None:
+    """Register the parent hub device that remote devices reference.
+
+    Entities use ``via_device=(DOMAIN, entry_id)`` to nest each remote BACnet
+    device under this hub. The hub device must exist in the registry first,
+    otherwise Home Assistant logs a ``non existing via_device`` warning.
+    """
+    device_registry = dr.async_get(hass)
+    local_ip = entry.data.get(CONF_LOCAL_IP) or entry.data.get(CONF_IP_ADDRESS)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        manufacturer=MANUFACTURER,
+        name=entry.title or "BACnet",
+        model="BACnet/IP interface",
+        configuration_url=None,
+        sw_version=str(local_ip) if local_ip else None,
+    )
 
 
 async def async_unload_entry(
