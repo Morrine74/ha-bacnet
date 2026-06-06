@@ -631,9 +631,16 @@ def _coerce_log_datum(value: Any) -> Any:
         return None
     if isinstance(value, (int, float, bool, str)):
         return value
+    # AnyAtomic (Schedule present-value, log data, ...) hides the real value
+    # behind get_value(); unwrap before inspecting attributes.
+    getter = getattr(value, "get_value", None)
+    if callable(getter):
+        with suppress(Exception):
+            return _coerce_log_datum(getter())
     for attr in ("value", "realValue", "enumeratedValue", "booleanValue"):
         if hasattr(value, attr):
-            return getattr(value, attr)
+            inner = getattr(value, attr)
+            return _coerce_log_datum(inner()) if callable(inner) else inner
     with suppress(Exception):
         return float(value)
     return str(value)

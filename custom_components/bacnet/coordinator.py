@@ -144,10 +144,23 @@ def _normalize_value(value: Any) -> Any:
     """Convert bacpypes primitives to plain Python values for HA state."""
     if value is None or isinstance(value, (int, float, bool, str)):
         return value
+
+    # AnyAtomic (e.g. a Schedule present-value) wraps the real atomic value and
+    # exposes it through get_value()/get_value_type(); unwrap it first.
+    getter = getattr(value, "get_value", None)
+    if callable(getter):
+        try:
+            return _normalize_value(getter())
+        except Exception:  # noqa: BLE001
+            pass
+
     for attr in ("value", "realValue", "enumeratedValue", "booleanValue"):
         if hasattr(value, attr):
-            return getattr(value, attr)
+            inner = getattr(value, attr)
+            return inner if not callable(inner) else _normalize_value(inner())
+
     try:
         return float(value)
     except (TypeError, ValueError):
         return str(value)
+

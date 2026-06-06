@@ -122,6 +122,11 @@ class BacnetScheduleCard extends HTMLElement {
     };
   }
 
+  static getConfigElement() {
+    // Visual editor with device -> schedule selectors.
+    return document.createElement("bacnet-schedule-card-editor");
+  }
+
   set hass(hass) {
     const first = this._hass === undefined;
     this._hass = hass;
@@ -706,5 +711,207 @@ if (!customElements.get("bacnet-schedule-card")) {
     preview: false,
     documentationURL: "https://github.com/Morrine74/ha-bacnet",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Visual editor: pick a BACnet device, then one of its schedules.
+// ---------------------------------------------------------------------------
+
+class BacnetScheduleCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._hass = null;
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  /** Collect schedule entities exposed by the BACnet integration. */
+  _schedules() {
+    if (!this._hass) return [];
+    const result = [];
+    for (const [entityId, state] of Object.entries(this._hass.states)) {
+      const attrs = state.attributes || {};
+      if (attrs.object_type !== "schedule" || !attrs.device_address) continue;
+      result.push({
+        entityId,
+        address: attrs.device_address,
+        deviceId: attrs.device_id,
+        objectId: attrs.object_id,
+        name: attrs.friendly_name || entityId,
+      });
+    }
+    return result;
+  }
+
+  _devices(schedules) {
+    const map = new Map();
+    for (const s of schedules) {
+      if (!map.has(s.address)) {
+        map.set(s.address, {
+          address: s.address,
+          deviceId: s.deviceId,
+          label: `Device ${s.deviceId ?? "?"} (${s.address})`,
+        });
+      }
+    }
+    return [...map.values()];
+  }
+
+  _emit(patch) {
+    this._config = { ...this._config, ...patch };
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: this._config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+    this._render();
+  }
+
+  _render() {
+    const schedules = this._schedules();
+    const devices = this._devices(schedules);
+    const selectedAddress = this._config.device_address || "";
+    const selectedObject = this._config.object_id || "";
+    const daySchedules = schedules.filter(
+      (s) => s.address === selectedAddress
+    );
+
+    const manualHint = devices.length
+      ? ""
+      : `<div class="ed-note">No schedule entities found yet. Add some
+         schedule points to the BACnet integration first, or fill the fields
+         manually below.</div>`;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        .ed { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }
+        label { font-size: 0.8rem; color: var(--secondary-text-color, #666); display: block; margin-bottom: 4px; }
+        select, input { width: 100%; box-sizing: border-box; padding: 8px;
+          border: 1px solid var(--divider-color, #ccc); border-radius: 6px;
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color, #212121); font-size: 0.9rem; }
+        .ed-note { font-size: 0.78rem; color: var(--warning-color, #b8860b);
+          background: var(--secondary-background-color, #faf7ec);
+          padding: 8px 10px; border-radius: 6px; }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      </style>
+      <div class="ed">
+        ${manualHint}
+        <div>
+          <label>Device</label>
+          <select id="device">
+            <option value="">— Select a device —</option>
+            ${devices
+              .map(
+                (d) =>
+                  `<option value="${d.address}" ${
+                    d.address === selectedAddress ? "selected" : ""
+                  }>${d.label}</option>`
+              )
+              .join("")}
+          </select>
+        </div>
+        <div>
+          <label>Schedule</label>
+          <select id="schedule" ${selectedAddress ? "" : "disabled"}>
+            <option value="">— Select a schedule —</option>
+            ${daySchedules
+              .map(
+                (s) =>
+                  `<option value="${s.objectId}" ${
+                    s.objectId === selectedObject ? "selected" : ""
+                  }>${s.name} [${s.objectId}]</option>`
+              )
+              .join("")}
+          </select>
+        </div>
+        <div>
+          <label>Title</label>
+          <input id="title" type="text" value="${
+            this._config.title || ""
+          }" placeholder="BACnet Schedule" />
+        </div>
+        <div class="row2">
+          <div>
+            <label>Resolution (min)</label>
+            <select id="resolution">
+              ${[15, 30, 60]
+                .map(
+                  (r) =>
+                    `<option value="${r}" ${
+                      Number(this._config.resolution || 30) === r
+                        ? "selected"
+                        : ""
+                    }>${r}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+          <div>
+            <label>Value type (optional)</label>
+            <select id="value_type">
+              ${["", "real", "unsigned", "integer", "boolean", "enumerated"]
+                .map(
+                  (t) =>
+                    `<option value="${t}" ${
+                      (this._config.value_type || "") === t ? "selected" : ""
+                    }>${t || "auto"}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const deviceSel = this.shadowRoot.getElementById("device");
+    const schedSel = this.shadowRoot.getElementById("schedule");
+    const titleInput = this.shadowRoot.getElementById("title");
+    const resSel = this.shadowRoot.getElementById("resolution");
+    const vtSel = this.shadowRoot.getElementById("value_type");
+
+    deviceSel.addEventListener("change", () => {
+      // Reset schedule when the device changes.
+      this._emit({ device_address: deviceSel.value, object_id: "" });
+    });
+    schedSel.addEventListener("change", () => {
+      const chosen = daySchedules.find((s) => s.objectId === schedSel.value);
+      this._emit({
+        object_id: schedSel.value,
+        title:
+          this._config.title || (chosen ? chosen.name : "BACnet Schedule"),
+      });
+    });
+    titleInput.addEventListener("change", () =>
+      this._emit({ title: titleInput.value })
+    );
+    resSel.addEventListener("change", () =>
+      this._emit({ resolution: Number(resSel.value) })
+    );
+    vtSel.addEventListener("change", () => {
+      const patch = { value_type: vtSel.value };
+      if (!vtSel.value) delete patch.value_type;
+      this._emit(patch);
+    });
+  }
+}
+
+if (!customElements.get("bacnet-schedule-card-editor")) {
+  customElements.define(
+    "bacnet-schedule-card-editor",
+    BacnetScheduleCardEditor
+  );
 }
 

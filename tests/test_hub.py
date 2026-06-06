@@ -23,6 +23,22 @@ def test_coerce_log_datum_unwraps_value_attr():
     assert hub._coerce_log_datum(_Wrapper(42)) == 42
 
 
+class _AnyAtomic:
+    """Stand-in for bacpypes AnyAtomic exposing get_value()."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def get_value(self):
+        return self._value
+
+
+def test_coerce_log_datum_unwraps_get_value():
+    assert hub._coerce_log_datum(_AnyAtomic(21.5)) == 21.5
+    # Nested: get_value returns another wrapper.
+    assert hub._coerce_log_datum(_AnyAtomic(_Wrapper(3))) == 3
+
+
 def test_parse_object_id_valid():
     assert hub.BACnetHub._parse_object_id("analog-input,5") == ("analog-input", 5)
 
