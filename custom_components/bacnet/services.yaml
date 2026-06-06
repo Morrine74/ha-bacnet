@@ -1,0 +1,181 @@
+read_property:
+  name: Read property
+  description: Read a single property from a remote BACnet object.
+  fields:
+    device_address:
+      name: Device address
+      description: BACnet address of the target device (e.g. 192.168.1.50 or 2:5).
+      required: true
+      example: "192.168.1.50"
+      selector:
+        text:
+    object_id:
+      name: Object id
+      description: Object identifier as "type,instance".
+      required: true
+      example: "analog-input,1"
+      selector:
+        text:
+    property:
+      name: Property
+      description: Property identifier to read.
+      default: present-value
+      example: present-value
+      selector:
+        text:
+    array_index:
+      name: Array index
+      description: Optional array index for array properties.
+      selector:
+        number:
+          mode: box
+          min: 0
+
+write_property:
+  name: Write property
+  description: Write a property on a remote BACnet object, optionally at a priority.
+  fields:
+    device_address:
+      name: Device address
+      required: true
+      example: "192.168.1.50"
+      selector:
+        text:
+    object_id:
+      name: Object id
+      required: true
+      example: "analog-value,2"
+      selector:
+        text:
+    property:
+      name: Property
+      default: present-value
+      selector:
+        text:
+    value:
+      name: Value
+      required: true
+      example: "21.5"
+      selector:
+        text:
+    priority:
+      name: Priority
+      description: Write priority (1 = highest, 16 = lowest).
+      default: 16
+      selector:
+        number:
+          mode: slider
+          min: 1
+          max: 16
+    array_index:
+      name: Array index
+      selector:
+        number:
+          mode: box
+          min: 0
+
+who_is:
+  name: Who-Is
+  description: Broadcast a Who-Is and return the discovered devices.
+  fields:
+    low_limit:
+      name: Low limit
+      selector:
+        number:
+          mode: box
+          min: 0
+    high_limit:
+      name: High limit
+      selector:
+        number:
+          mode: box
+          min: 0
+    device_address:
+      name: Target address
+      description: Optional unicast/broadcast destination.
+      selector:
+        text:
+
+read_schedule:
+  name: Read schedule
+  description: Read the weekly and exception schedules of a Schedule object.
+  fields:
+    device_address:
+      name: Device address
+      required: true
+      selector:
+        text:
+    object_id:
+      name: Object id
+      required: true
+      example: "schedule,1"
+      selector:
+        text:
+
+write_schedule:
+  name: Write schedule
+  description: Write a weekly schedule to a Schedule object.
+  fields:
+    device_address:
+      name: Device address
+      required: true
+      selector:
+        text:
+    object_id:
+      name: Object id
+      required: true
+      example: "schedule,1"
+      selector:
+        text:
+    schedule:
+      name: Schedule
+      description: Weekly schedule structure (list of 7 days of time/value slots).
+      required: true
+      selector:
+        object:
+
+read_trend_log:
+  name: Read trend log
+  description: Read recent records from a Trend Log object.
+  fields:
+    device_address:
+      name: Device address
+      required: true
+      selector:
+        text:
+    object_id:
+      name: Object id
+      required: true
+      example: "trend-log,1"
+      selector:
+        text:
+    count:
+      name: Count
+      description: Number of most recent records to return.
+      default: 50
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 1000
+
+acknowledge_alarm:
+  name: Acknowledge alarm
+  description: Acknowledge an alarm/event on a BACnet object.
+  fields:
+    device_address:
+      name: Device address
+      required: true
+      selector:
+        text:
+    object_id:
+      name: Object id
+      required: true
+      selector:
+        text:
+    event_state:
+      name: Event state
+      description: The event state to acknowledge (e.g. offnormal, fault, normal).
+      required: true
+      selector:
+        text:

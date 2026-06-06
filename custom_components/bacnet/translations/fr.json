@@ -1,0 +1,62 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Réseau BACnet",
+        "description": "Configurez l'interface BACnet/IP locale utilisée par Home Assistant.",
+        "data": {
+          "local_ip": "IP/CIDR locale (ex. 192.168.1.10/24)",
+          "local_object_id": "Instance du périphérique local",
+          "local_object_name": "Nom du périphérique local",
+          "bbmd_address": "Adresse BBMD (optionnel, pour l'enregistrement Foreign Device)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de démarrer la pile BACnet sur cette interface."
+    },
+    "abort": {
+      "already_configured": "Cette interface BACnet est déjà configurée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options BACnet",
+        "menu_options": {
+          "discover": "Découvrir et ajouter un périphérique",
+          "settings": "Paramètres d'interrogation",
+          "remove_device": "Supprimer un périphérique"
+        }
+      },
+      "discover": {
+        "title": "Périphériques découverts",
+        "data": { "device": "Périphérique" }
+      },
+      "select_points": {
+        "title": "Sélection des points",
+        "description": "Choisissez les objets à surveiller sur {device}.",
+        "data": {
+          "points": "Points",
+          "use_cov": "Utiliser les abonnements COV (Change-Of-Value)",
+          "write_priority": "Priorité d'écriture par défaut"
+        }
+      },
+      "settings": {
+        "title": "Paramètres d'interrogation",
+        "data": { "scan_interval": "Intervalle d'interrogation (secondes)" }
+      },
+      "remove_device": {
+        "title": "Supprimer un périphérique",
+        "data": { "device": "Périphérique" }
+      }
+    },
+    "abort": {
+      "not_loaded": "L'intégration doit être chargée pour découvrir les périphériques.",
+      "no_devices_found": "Aucun périphérique BACnet n'a répondu au Who-Is.",
+      "no_objects_found": "Aucun objet trouvé sur le périphérique sélectionné.",
+      "no_devices_configured": "Aucun périphérique configuré à supprimer.",
+      "discovery_failed": "Échec de la découverte. Vérifiez la configuration réseau."
+    }
+  }
+}

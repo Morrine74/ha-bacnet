@@ -1,0 +1,62 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BACnet network",
+        "description": "Configure the local BACnet/IP interface Home Assistant will use.",
+        "data": {
+          "local_ip": "Local IP/CIDR (e.g. 192.168.1.10/24)",
+          "local_object_id": "Local device instance",
+          "local_object_name": "Local device name",
+          "bbmd_address": "BBMD address (optional, for foreign device registration)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to start the BACnet stack on this interface."
+    },
+    "abort": {
+      "already_configured": "This BACnet interface is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "BACnet options",
+        "menu_options": {
+          "discover": "Discover and add a device",
+          "settings": "Polling settings",
+          "remove_device": "Remove a device"
+        }
+      },
+      "discover": {
+        "title": "Discovered devices",
+        "data": { "device": "Device" }
+      },
+      "select_points": {
+        "title": "Select points",
+        "description": "Choose the objects to monitor on {device}.",
+        "data": {
+          "points": "Points",
+          "use_cov": "Use Change-Of-Value subscriptions",
+          "write_priority": "Default write priority"
+        }
+      },
+      "settings": {
+        "title": "Polling settings",
+        "data": { "scan_interval": "Scan interval (seconds)" }
+      },
+      "remove_device": {
+        "title": "Remove a device",
+        "data": { "device": "Device" }
+      }
+    },
+    "abort": {
+      "not_loaded": "The integration must be loaded to discover devices.",
+      "no_devices_found": "No BACnet devices answered the Who-Is broadcast.",
+      "no_objects_found": "No objects were found on the selected device.",
+      "no_devices_configured": "There are no configured devices to remove.",
+      "discovery_failed": "Discovery failed. Check the network configuration."
+    }
+  }
+}
