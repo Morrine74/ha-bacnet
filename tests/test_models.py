@@ -24,6 +24,30 @@ def test_point_config_round_trip():
     assert restored.description == "Room setpoint"
 
 
+def test_point_config_state_text_round_trip():
+    point = models.PointConfig(
+        object_type="multi-state-value",
+        instance=2,
+        name="Mode",
+        state_text=["Off", "Comfort", "Eco"],
+    )
+    restored = models.PointConfig.from_dict(point.to_dict())
+    assert restored.state_text == ["Off", "Comfort", "Eco"]
+
+
+def test_point_config_binary_text_round_trip():
+    point = models.PointConfig(
+        object_type="binary-value",
+        instance=3,
+        name="Pump",
+        active_text="Running",
+        inactive_text="Stopped",
+    )
+    restored = models.PointConfig.from_dict(point.to_dict())
+    assert restored.active_text == "Running"
+    assert restored.inactive_text == "Stopped"
+
+
 def test_point_config_read_only_type_not_writable():
     point = models.PointConfig(object_type="analog-input", instance=1, name="Temp")
     assert point.writable is False

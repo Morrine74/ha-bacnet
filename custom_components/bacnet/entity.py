@@ -68,4 +68,10 @@ class BACnetEntity(CoordinatorEntity[BACnetCoordinator]):
             attrs["description"] = self._point.description
         if self._point.units:
             attrs["bacnet_units"] = self._point.units
+        if self._point.state_text:
+            attrs["state_text"] = self._point.state_text
+        if self._point.active_text:
+            attrs["active_text"] = self._point.active_text
+        if self._point.inactive_text:
+            attrs["inactive_text"] = self._point.inactive_text
         return attrs

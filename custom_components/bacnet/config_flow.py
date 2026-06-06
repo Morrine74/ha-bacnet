@@ -301,6 +301,9 @@ class BACnetOptionsFlow(OptionsFlow):
                         write_priority=priority,
                         units=obj.units,
                         description=obj.description,
+                        state_text=obj.state_text,
+                        active_text=obj.active_text,
+                        inactive_text=obj.inactive_text,
                     )
                 )
             device.points = points

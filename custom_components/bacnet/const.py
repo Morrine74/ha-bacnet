@@ -27,6 +27,9 @@ CONF_COV_LIFETIME: Final = "cov_lifetime"
 CONF_WRITE_PRIORITY: Final = "write_priority"
 CONF_UNITS: Final = "units"
 CONF_DESCRIPTION: Final = "description"
+CONF_STATE_TEXT: Final = "state_text"
+CONF_ACTIVE_TEXT: Final = "active_text"
+CONF_INACTIVE_TEXT: Final = "inactive_text"
 
 # Defaults
 DEFAULT_LOCAL_OBJECT_ID: Final = 599

@@ -6,15 +6,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    CONF_ACTIVE_TEXT,
     CONF_COV_LIFETIME,
     CONF_DESCRIPTION,
     CONF_DEVICE_ADDRESS,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
+    CONF_INACTIVE_TEXT,
     CONF_OBJECT_INSTANCE,
     CONF_OBJECT_NAME,
     CONF_OBJECT_TYPE,
     CONF_OBJECTS,
+    CONF_STATE_TEXT,
     CONF_UNITS,
     CONF_USE_COV,
     CONF_WRITE_PRIORITY,
@@ -36,6 +39,9 @@ class PointConfig:
     write_priority: int = DEFAULT_WRITE_PRIORITY
     units: str | None = None
     description: str | None = None
+    state_text: list[str] | None = None
+    active_text: str | None = None
+    inactive_text: str | None = None
 
     @property
     def object_id(self) -> str:
@@ -58,6 +64,9 @@ class PointConfig:
             CONF_WRITE_PRIORITY: self.write_priority,
             CONF_UNITS: self.units,
             CONF_DESCRIPTION: self.description,
+            CONF_STATE_TEXT: self.state_text,
+            CONF_ACTIVE_TEXT: self.active_text,
+            CONF_INACTIVE_TEXT: self.inactive_text,
         }
 
     @classmethod
@@ -74,6 +83,9 @@ class PointConfig:
             ),
             units=data.get(CONF_UNITS),
             description=data.get(CONF_DESCRIPTION),
+            state_text=data.get(CONF_STATE_TEXT),
+            active_text=data.get(CONF_ACTIVE_TEXT),
+            inactive_text=data.get(CONF_INACTIVE_TEXT),
         )
 
 

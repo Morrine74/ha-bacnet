@@ -53,6 +53,14 @@ class BACnetSensor(BACnetEntity, SensorEntity):
                 return round(float(value), 3)
             except (TypeError, ValueError):
                 return value
+        # Multi-state inputs: map the 1-based index to its state-text label.
+        if self._point.object_type in MULTI_STATE_TYPES and self._point.state_text:
+            try:
+                pos = int(value) - 1
+            except (TypeError, ValueError):
+                return value
+            if 0 <= pos < len(self._point.state_text):
+                return self._point.state_text[pos]
         return value
 
     @property

@@ -38,6 +38,9 @@ class DiscoveredObject:
     name: str | None = None
     description: str | None = None
     units: str | None = None
+    state_text: list[str] | None = None
+    active_text: str | None = None
+    inactive_text: str | None = None
 
     @property
     def object_id(self) -> str:
@@ -363,6 +366,9 @@ class BACnetHub:
             name = None
             description = None
             units = None
+            state_text = None
+            active_text = None
+            inactive_text = None
             with suppress(BACnetHubError):
                 name = str(
                     await self.async_read_property(
@@ -382,6 +388,25 @@ class BACnetHub:
                             address, object_id, "units"
                         )
                     )
+            elif obj_type.startswith("multi-state"):
+                with suppress(BACnetHubError):
+                    raw = await self.async_read_property(
+                        address, object_id, "state-text"
+                    )
+                    state_text = [str(item) for item in raw or []] or None
+            elif obj_type.startswith("binary"):
+                with suppress(BACnetHubError):
+                    active_text = str(
+                        await self.async_read_property(
+                            address, object_id, "active-text"
+                        )
+                    )
+                with suppress(BACnetHubError):
+                    inactive_text = str(
+                        await self.async_read_property(
+                            address, object_id, "inactive-text"
+                        )
+                    )
             objects.append(
                 DiscoveredObject(
                     object_type=obj_type,
@@ -389,6 +414,9 @@ class BACnetHub:
                     name=name,
                     description=description,
                     units=units,
+                    state_text=state_text,
+                    active_text=active_text,
+                    inactive_text=inactive_text,
                 )
             )
         return objects
