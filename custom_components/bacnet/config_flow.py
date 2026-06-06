@@ -13,8 +13,11 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
+import homeassistant.helpers.config_validation as cv
 
 from .const import (
+    ANALOG_TYPES,
+    BINARY_TYPES,
     CONF_BBMD_ADDRESS,
     CONF_COV_LIFETIME,
     CONF_DEVICES,
@@ -34,6 +37,7 @@ from .const import (
     MAX_WRITE_PRIORITY,
     MIN_SCAN_INTERVAL,
     MIN_WRITE_PRIORITY,
+    MULTI_STATE_TYPES,
 )
 from .hub import BACnetHub, BACnetHubError
 from .models import DeviceConfig, PointConfig, devices_from_options
@@ -333,17 +337,23 @@ class BACnetOptionsFlow(OptionsFlow):
         if not self._discovered_objects:
             return self.async_abort(reason="no_objects_found")
 
+        # Only objects that map to a Home Assistant entity are offered here.
+        # Other types (schedule, trend-log, file, loop, structured-view,
+        # notification-class, proprietary types, ...) are accessed through
+        # services and the Lovelace card instead.
+        mappable = ANALOG_TYPES | BINARY_TYPES | MULTI_STATE_TYPES
         options = {
             o.object_id: f"{o.name or o.object_id} [{o.object_type}]"
             for o in self._discovered_objects
+            if o.object_type in mappable
         }
+        if not options:
+            return self.async_abort(reason="no_objects_found")
         return self.async_show_form(
             step_id="select_points",
             data_schema=vol.Schema(
                 {
-                    vol.Required("points", default=list(options)): vol.All(
-                        [vol.In(options)]
-                    ),
+                    vol.Required("points", default=[]): cv.multi_select(options),
                     vol.Optional(CONF_USE_COV, default=False): bool,
                     vol.Optional(
                         CONF_WRITE_PRIORITY, default=DEFAULT_WRITE_PRIORITY
