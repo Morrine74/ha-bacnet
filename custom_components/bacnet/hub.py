@@ -302,16 +302,48 @@ class BACnetHub:
             ) from err
 
     async def async_object_list(self, address: str, device_id: int) -> list[str]:
-        """Return the raw object-list of a remote device."""
-        ids = await self.async_read_property(
-            address, f"device,{device_id}", "object-list"
-        )
-        result: list[str] = []
-        for item in ids or []:
-            try:
-                result.append(f"{item[0]},{int(item[1])}")
-            except (TypeError, IndexError):
-                result.append(str(item))
+        """Return the raw object-list of a remote device.
+
+        Reading the whole ``object-list`` array in a single ReadProperty often
+        requires segmentation, which many devices (or the path between them and
+        Home Assistant) do not handle well, leading to errors. To be robust we
+        first try the bulk read and, on any failure, fall back to reading the
+        array size (index 0) followed by each element by its array index.
+        """
+        device_obj = f"device,{device_id}"
+
+        # Fast path: bulk read of the whole array.
+        try:
+            ids = await self.async_read_property(address, device_obj, "object-list")
+            result = _object_ids_to_str(ids)
+            if result:
+                return result
+        except BACnetHubError as err:
+            _LOGGER.debug(
+                "Bulk object-list read failed for %s (%s); using indexed reads",
+                device_obj,
+                err,
+            )
+
+        # Fallback: indexed reads, element by element.
+        try:
+            size = int(
+                await self.async_read_property(
+                    address, device_obj, "object-list", array_index=0
+                )
+            )
+        except (BACnetHubError, TypeError, ValueError) as err:
+            raise BACnetHubError(
+                f"Could not read object-list size of {device_obj}: {err}"
+            ) from err
+
+        result = []
+        for index in range(1, size + 1):
+            with suppress(BACnetHubError):
+                item = await self.async_read_property(
+                    address, device_obj, "object-list", array_index=index
+                )
+                result.extend(_object_ids_to_str([item]))
         return result
 
     async def async_discover_objects(
@@ -321,7 +353,11 @@ class BACnetHub:
         object_ids = await self.async_object_list(address, device_id)
         objects: list[DiscoveredObject] = []
         for object_id in object_ids:
-            obj_type, instance = self._parse_object_id(object_id)
+            try:
+                obj_type, instance = self._parse_object_id(object_id)
+            except BACnetHubError:
+                _LOGGER.debug("Skipping unparseable object id %r", object_id)
+                continue
             if obj_type == "device":
                 continue
             name = None
@@ -601,6 +637,19 @@ def _coerce_log_datum(value: Any) -> Any:
     with suppress(Exception):
         return float(value)
     return str(value)
+
+
+def _object_ids_to_str(ids: Any) -> list[str]:
+    """Normalise a list of BACnet object identifiers to ``type,instance`` strings."""
+    result: list[str] = []
+    for item in ids or []:
+        try:
+            result.append(f"{item[0]},{int(item[1])}")
+        except (TypeError, IndexError, ValueError):
+            text = str(item)
+            if text:
+                result.append(text)
+    return result
 
 
 def _serialize_weekly_schedule(weekly: Any) -> list[list[dict[str, Any]]] | None:

@@ -87,3 +87,12 @@ def test_infer_value_type_from_first_typed_value():
         "unsigned"
     )
 
+
+def test_object_ids_to_str_handles_tuples_and_strings():
+    assert hub._object_ids_to_str(
+        [("analog-input", 1), ("binary-value", 4)]
+    ) == ["analog-input,1", "binary-value,4"]
+    # Non-tuple items fall back to their string form.
+    assert hub._object_ids_to_str(["device,99"]) == ["device,99"]
+    assert hub._object_ids_to_str(None) == []
+

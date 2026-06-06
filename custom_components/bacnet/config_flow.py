@@ -313,7 +313,21 @@ class BACnetOptionsFlow(OptionsFlow):
             self._discovered_objects = await hub.async_discover_objects(
                 device.address, device.device_id
             )
-        except BACnetHubError:
+        except BACnetHubError as err:
+            _LOGGER.warning(
+                "Object discovery failed for %s (%s): %s",
+                device.name,
+                device.address,
+                err,
+            )
+            return self.async_abort(reason="discovery_failed")
+        except Exception as err:  # noqa: BLE001 - surface as clean abort
+            _LOGGER.exception(
+                "Unexpected error discovering objects on %s (%s): %s",
+                device.name,
+                device.address,
+                err,
+            )
             return self.async_abort(reason="discovery_failed")
 
         if not self._discovered_objects:
