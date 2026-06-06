@@ -442,10 +442,16 @@ class BACnetHub:
     async def async_read_schedule(
         self, address: str, object_id: str
     ) -> dict[str, Any]:
-        """Read weekly and exception schedules from a Schedule object."""
+        """Read weekly and exception schedules from a Schedule object.
+
+        The returned ``value_type`` is inferred from ``schedule-default`` and
+        tells the caller (and the Lovelace card) which primitive datatype the
+        schedule entries use, so a later write can be typed identically.
+        """
         weekly = None
         exception = None
         present_value = None
+        schedule_default = None
         with suppress(BACnetHubError):
             weekly = await self.async_read_property(
                 address, object_id, "weekly-schedule"
@@ -458,18 +464,59 @@ class BACnetHub:
             present_value = await self.async_read_property(
                 address, object_id, "present-value"
             )
+        with suppress(BACnetHubError):
+            schedule_default = await self.async_read_property(
+                address, object_id, "schedule-default"
+            )
+
+        value_type = _bacpypes_type_name(schedule_default)
+        if value_type is None:
+            value_type = _infer_value_type_from_weekly(weekly)
+
         return {
             "weekly_schedule": _serialize_weekly_schedule(weekly),
             "exception_schedule": _serialize_exception_schedule(exception),
             "present_value": _coerce_log_datum(present_value),
+            "schedule_default": _coerce_log_datum(schedule_default),
+            "value_type": value_type,
         }
 
     async def async_write_schedule(
-        self, address: str, object_id: str, weekly_schedule: Any
+        self,
+        address: str,
+        object_id: str,
+        weekly_schedule: Any,
+        *,
+        value_type: str | None = None,
     ) -> None:
-        """Write a weekly schedule back to a Schedule object."""
+        """Write a full 7-day weekly schedule to a Schedule object.
+
+        BACnet's ``weekly-schedule`` is a ``BACnetARRAY[7] of DailySchedule`` and
+        most controllers only accept the *whole* array in a single write (this
+        is exactly what is seen on the wire). We therefore always build all seven
+        days as properly typed ``DailySchedule`` objects and write the complete
+        array (no array index), instead of forwarding a loosely typed Python
+        list. When ``value_type`` is not supplied it is auto-detected from the
+        object's ``schedule-default`` property.
+        """
+        if value_type is None:
+            with suppress(BACnetHubError):
+                default = await self.async_read_property(
+                    address, object_id, "schedule-default"
+                )
+                value_type = _bacpypes_type_name(default)
+        if value_type is None:
+            value_type = "real"
+
+        weekly_object = _build_weekly_schedule(weekly_schedule, value_type)
+
+        # array_index is intentionally None so the entire 7-day array is sent.
         await self.async_write_property(
-            address, object_id, "weekly-schedule", weekly_schedule
+            address,
+            object_id,
+            "weekly-schedule",
+            weekly_object,
+            array_index=None,
         )
 
     async def async_acknowledge_alarm(
@@ -544,3 +591,133 @@ def _serialize_exception_schedule(exception: Any) -> list[dict[str, Any]] | None
     for special_event in exception:
         result.append({"raw": str(special_event)})
     return result
+
+
+def _bacpypes_type_name(value: Any) -> str | None:
+    """Map a bacpypes primitive instance to a canonical value-type name.
+
+    Returns one of ``real``, ``unsigned``, ``integer``, ``boolean``,
+    ``enumerated`` or ``None`` when the type cannot be determined.
+    """
+    if value is None:
+        return None
+    cls = type(value).__name__.lower()
+    if "real" in cls or "double" in cls:
+        return "real"
+    if "unsigned" in cls:
+        return "unsigned"
+    if "boolean" in cls:
+        return "boolean"
+    if "enumerated" in cls:
+        return "enumerated"
+    if "integer" in cls:
+        return "integer"
+    return None
+
+
+def _infer_value_type_from_weekly(weekly: Any) -> str:
+    """Guess the entry datatype by inspecting the first value in the schedule."""
+    if weekly is None:
+        return "real"
+    for day in weekly:
+        for time_value in getattr(day, "daySchedule", day) or []:
+            name = _bacpypes_type_name(getattr(time_value, "value", None))
+            if name:
+                return name
+    return "real"
+
+
+def _build_schedule_value(value: Any, value_type: str) -> Any:
+    """Build a typed bacpypes primitive for a schedule entry value.
+
+    A ``None`` value is encoded as ``Null`` which, in a BACnet schedule, means
+    "no action" at that time (relinquish), matching the protocol semantics.
+    """
+    from bacpypes3.primitivedata import (
+        Boolean,
+        Enumerated,
+        Integer,
+        Null,
+        Real,
+        Unsigned,
+    )
+
+    if value is None:
+        return Null(())
+
+    vt = (value_type or "real").lower()
+    try:
+        if vt in ("real", "float", "analog", "double"):
+            return Real(float(value))
+        if vt in ("unsigned", "multistate", "multi-state", "multi_state"):
+            return Unsigned(int(value))
+        if vt in ("integer", "int"):
+            return Integer(int(value))
+        if vt in ("boolean", "bool"):
+            if isinstance(value, str):
+                value = value.lower() in ("1", "true", "on", "active")
+            return Boolean(bool(value))
+        if vt in ("enumerated", "binary", "binary-pv"):
+            return Enumerated(int(value))
+    except (TypeError, ValueError) as err:
+        raise BACnetHubError(
+            f"Cannot encode schedule value {value!r} as {vt}: {err}"
+        ) from err
+
+    # Fallback: best-effort real.
+    with suppress(TypeError, ValueError):
+        return Real(float(value))
+    raise BACnetHubError(f"Unsupported schedule value type '{value_type}'")
+
+
+def _build_daily_schedule(day_entries: Any, value_type: str) -> Any:
+    """Build a bacpypes ``DailySchedule`` from a list of ``{time, value}``."""
+    from bacpypes3.basetypes import DailySchedule, TimeValue
+    from bacpypes3.primitivedata import Time
+
+    time_values = []
+    for entry in day_entries or []:
+        raw_time = entry.get("time") if isinstance(entry, dict) else None
+        raw_value = entry.get("value") if isinstance(entry, dict) else None
+        if raw_time is None:
+            continue
+        time_values.append(
+            TimeValue(
+                time=Time(_normalize_time_string(raw_time)),
+                value=_build_schedule_value(raw_value, value_type),
+            )
+        )
+    return DailySchedule(daySchedule=time_values)
+
+
+def _build_weekly_schedule(weekly_schedule: Any, value_type: str) -> Any:
+    """Build a fully typed 7-day ``WeeklySchedule`` for writing.
+
+    The result always contains exactly seven ``DailySchedule`` entries (empty
+    days are kept as empty lists) so the complete array is written in one shot,
+    which is what BACnet controllers expect on the wire.
+    """
+    from bacpypes3.basetypes import WeeklySchedule
+
+    days = list(weekly_schedule or [])
+    # Normalise to exactly 7 days.
+    days = (days + [[] for _ in range(7)])[:7]
+
+    daily = [_build_daily_schedule(day, value_type) for day in days]
+
+    try:
+        return WeeklySchedule(daySchedule=daily)
+    except TypeError:
+        # Some bacpypes3 versions accept the array positionally.
+        return WeeklySchedule(daily)
+
+
+def _normalize_time_string(value: Any) -> str:
+    """Coerce a time into the ``HH:MM:SS`` form expected by bacpypes ``Time``."""
+    text = str(value).strip()
+    parts = text.split(":")
+    while len(parts) < 3:
+        parts.append("00")
+    h, m, s = parts[0], parts[1], parts[2]
+    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+

@@ -77,6 +77,9 @@ _SCHEDULE_WRITE_SCHEMA = vol.Schema(
         vol.Required(ATTR_DEVICE_ADDRESS): cv.string,
         vol.Required(ATTR_OBJECT_ID): cv.string,
         vol.Required(ATTR_SCHEDULE): vol.Any(list, dict),
+        vol.Optional("value_type"): vol.In(
+            ["real", "unsigned", "integer", "boolean", "enumerated"]
+        ),
     }
 )
 
@@ -172,6 +175,7 @@ def async_register_services(hass: HomeAssistant) -> None:
                 call.data[ATTR_DEVICE_ADDRESS],
                 call.data[ATTR_OBJECT_ID],
                 call.data[ATTR_SCHEDULE],
+                value_type=call.data.get("value_type"),
             )
         except BACnetHubError as err:
             raise HomeAssistantError(str(err)) from err

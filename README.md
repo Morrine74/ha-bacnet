@@ -101,6 +101,14 @@ A custom Lovelace card renders a BACnet `schedule` object as an interactive
   fill the day, copy/paste a day)
 - **Save** writes the grid back through `bacnet.write_schedule`
 
+> **About writing:** a BACnet `weekly-schedule` is a `BACnetARRAY[7] of
+> DailySchedule`, and controllers expect the **whole week** to be written at
+> once (as you can confirm on a Wireshark capture). The integration therefore
+> always builds and sends all seven days as properly typed `DailySchedule`
+> objects. Entry values are typed (`Real`, `Unsigned`, `Enumerated`, …); the
+> type is auto-detected from the object's `schedule-default`, or can be forced
+> via the `value_type` option / card config.
+
 ### Install the card
 
 1. Copy `www/bacnet-schedule-card.js` into your Home Assistant `config/www/`

@@ -41,3 +41,49 @@ def test_serialize_weekly_schedule_none():
 def test_discovered_object_object_id():
     obj = hub.DiscoveredObject(object_type="analog-value", instance=9)
     assert obj.object_id == "analog-value,9"
+
+
+class _NamedPrimitive:
+    """Stand-in whose class name mimics a bacpypes primitive type."""
+
+
+class Real(_NamedPrimitive):
+    pass
+
+
+class Unsigned(_NamedPrimitive):
+    pass
+
+
+class Enumerated(_NamedPrimitive):
+    pass
+
+
+def test_bacpypes_type_name_maps_by_class():
+    assert hub._bacpypes_type_name(Real()) == "real"
+    assert hub._bacpypes_type_name(Unsigned()) == "unsigned"
+    assert hub._bacpypes_type_name(Enumerated()) == "enumerated"
+    assert hub._bacpypes_type_name(None) is None
+
+
+def test_normalize_time_string_pads_components():
+    assert hub._normalize_time_string("8:0") == "08:00:00"
+    assert hub._normalize_time_string("08:30") == "08:30:00"
+    assert hub._normalize_time_string("23:15:45") == "23:15:45"
+
+
+def test_infer_value_type_defaults_to_real_when_empty():
+    assert hub._infer_value_type_from_weekly(None) == "real"
+    assert hub._infer_value_type_from_weekly([[], [], []]) == "real"
+
+
+class _DayWithValue:
+    def __init__(self, value):
+        self.daySchedule = [type("TV", (), {"value": value})()]
+
+
+def test_infer_value_type_from_first_typed_value():
+    assert hub._infer_value_type_from_weekly([_DayWithValue(Unsigned())]) == (
+        "unsigned"
+    )
+

@@ -114,7 +114,7 @@ read_schedule:
 
 write_schedule:
   name: Write schedule
-  description: Write a weekly schedule to a Schedule object.
+  description: Write a full 7-day weekly schedule to a Schedule object.
   fields:
     device_address:
       name: Device address
@@ -133,6 +133,20 @@ write_schedule:
       required: true
       selector:
         object:
+    value_type:
+      name: Value type
+      description: >-
+        Datatype of the schedule entry values. Leave empty to auto-detect from
+        the object's schedule-default property.
+      example: real
+      selector:
+        select:
+          options:
+            - real
+            - unsigned
+            - integer
+            - boolean
+            - enumerated
 
 read_trend_log:
   name: Read trend log

@@ -236,6 +236,7 @@ class BacnetScheduleCard extends HTMLElement {
       );
       const data = (response && response.response) || response || {};
       this._grid = this._scheduleToGrid(data.weekly_schedule);
+      this._valueType = data.value_type || null;
       this._dirty = false;
     } catch (err) {
       this._error = String(err);
@@ -249,11 +250,16 @@ class BacnetScheduleCard extends HTMLElement {
     if (!this._hass) return;
     this._error = null;
     try {
-      await this._hass.callService("bacnet", "write_schedule", {
+      const payload = {
         device_address: this._config.device_address,
         object_id: this._config.object_id,
         schedule: this._gridToSchedule(),
-      });
+      };
+      // Prefer an explicit card config, then the type detected on read; when
+      // neither is known the backend auto-detects from schedule-default.
+      const valueType = this._config.value_type || this._valueType;
+      if (valueType) payload.value_type = valueType;
+      await this._hass.callService("bacnet", "write_schedule", payload);
       this._dirty = false;
       this._update();
     } catch (err) {
