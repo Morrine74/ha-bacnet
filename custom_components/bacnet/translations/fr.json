@@ -26,12 +26,17 @@
         "menu_options": {
           "discover": "Découvrir et ajouter un périphérique",
           "add_by_ip": "Ajouter un périphérique par adresse IP",
+          "manage_device": "Gérer un périphérique (ajouter/retirer des points, renommer)",
           "settings": "Paramètres d'interrogation",
           "remove_device": "Supprimer un périphérique"
         }
       },
       "discover": {
         "title": "Périphériques découverts",
+        "data": { "device": "Périphérique" }
+      },
+      "manage_device": {
+        "title": "Gérer un périphérique",
         "data": { "device": "Périphérique" }
       },
       "add_by_ip": {
@@ -44,8 +49,9 @@
       },
       "select_points": {
         "title": "Sélection des points",
-        "description": "Choisissez les objets à surveiller sur {device}.",
+        "description": "Choisissez les objets à surveiller sur {device}. Les points déjà configurés sont pré-cochés ; cochez ou décochez pour ajouter ou retirer.",
         "data": {
+          "device_name": "Nom du périphérique",
           "points": "Points",
           "use_cov": "Utiliser les abonnements COV (Change-Of-Value)",
           "write_priority": "Priorité d'écriture par défaut"
@@ -64,7 +70,7 @@
       "not_loaded": "L'intégration doit être chargée pour découvrir les périphériques.",
       "no_devices_found": "Aucun périphérique BACnet n'a répondu au Who-Is.",
       "no_objects_found": "Aucun objet trouvé sur le périphérique sélectionné.",
-      "no_devices_configured": "Aucun périphérique configuré à supprimer.",
+      "no_devices_configured": "Aucun périphérique configuré.",
       "discovery_failed": "Échec de la découverte. Vérifiez la configuration réseau.",
       "device_not_found": "Aucun périphérique n'a répondu à cette adresse IP."
     }

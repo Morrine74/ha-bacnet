@@ -18,6 +18,7 @@ import homeassistant.helpers.config_validation as cv
 from .const import (
     CONF_BBMD_ADDRESS,
     CONF_COV_LIFETIME,
+    CONF_DEVICE_NAME,
     CONF_DEVICES,
     CONF_LOCAL_IP,
     CONF_LOCAL_OBJECT_ID,
@@ -37,7 +38,7 @@ from .const import (
     MIN_WRITE_PRIORITY,
     SELECTABLE_TYPES,
 )
-from .hub import BACnetHub, BACnetHubError
+from .hub import BACnetHub, BACnetHubError, _ensure_cidr
 from .models import DeviceConfig, PointConfig, devices_from_options
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,7 +94,9 @@ class BACnetConfigFlow(ConfigFlow, domain=DOMAIN):
         """Collect local interface settings and validate the stack starts."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            local_ip = user_input[CONF_LOCAL_IP].strip()
+            # Normalise to a CIDR so Who-Is broadcasts (Discover) work; a bare
+            # host otherwise yields "no broadcast" and an empty discovery.
+            local_ip = _ensure_cidr(user_input[CONF_LOCAL_IP])
             await self.async_set_unique_id(f"{local_ip}_{user_input[CONF_LOCAL_OBJECT_ID]}")
             self._abort_if_unique_id_configured()
 
@@ -163,9 +166,57 @@ class BACnetOptionsFlow(OptionsFlow):
             menu_options=[
                 "discover",
                 "add_by_ip",
+                "manage_device",
                 "settings",
                 "remove_device",
             ],
+        )
+
+    async def async_step_manage_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick an already-configured device to edit its points / name.
+
+        Re-runs object discovery for that device and re-enters the point picker
+        with the current selection pre-ticked, so points can be added or removed
+        without rebuilding the whole list.
+        """
+        if not self._devices:
+            return self.async_abort(reason="no_devices_configured")
+
+        if user_input is not None:
+            device = next(
+                (
+                    d
+                    for d in self._devices
+                    if d.device_id == int(user_input["device"])
+                ),
+                None,
+            )
+            if device is None:
+                return self.async_abort(reason="no_devices_configured")
+            self._selected_device = device
+            # Re-derive the vendor id so a Siemens device keeps its tree-path
+            # grouping when re-discovered (DeviceConfig does not store it).
+            self._selected_vendor_id = None
+            hub = self._hub()
+            if hub is not None and hub.started:
+                try:
+                    found = await hub.async_who_is(
+                        address=device.address, timeout=DEFAULT_DISCOVERY_TIMEOUT
+                    )
+                except BACnetHubError:
+                    found = []
+                if found:
+                    self._selected_vendor_id = found[0].vendor_id
+            return await self.async_step_select_points()
+
+        options = {
+            str(d.device_id): f"{d.name} ({d.address})" for d in self._devices
+        }
+        return self.async_show_form(
+            step_id="manage_device",
+            data_schema=vol.Schema({vol.Required("device"): vol.In(options)}),
         )
 
     async def async_step_settings(
@@ -311,6 +362,9 @@ class BACnetOptionsFlow(OptionsFlow):
             chosen = user_input.get("points", [])
             use_cov = user_input.get(CONF_USE_COV, False)
             priority = user_input.get(CONF_WRITE_PRIORITY, DEFAULT_WRITE_PRIORITY)
+            new_name = (user_input.get(CONF_DEVICE_NAME) or "").strip()
+            if new_name:
+                device.name = new_name
             lookup = {o.object_id: o for o in self._discovered_objects}
             points: list[PointConfig] = []
             for object_id in chosen:
@@ -375,21 +429,45 @@ class BACnetOptionsFlow(OptionsFlow):
         # notification-class, proprietary types, ...) are accessed through
         # services instead. Schedules are included so they can be exposed and
         # edited with the schedule card.
-        options = {
-            o.object_id: _point_label(o)
-            for o in self._discovered_objects
-            if o.object_type in SELECTABLE_TYPES
-        }
+        # Sort by tree path so points of the same installation are adjacent and
+        # readable (falls back to type/instance for non-Siemens devices).
+        selectable = [
+            o for o in self._discovered_objects if o.object_type in SELECTABLE_TYPES
+        ]
+        selectable.sort(
+            key=lambda o: o.tree_path or [o.object_type, f"{o.instance:08d}"]
+        )
+        options = {o.object_id: _point_label(o) for o in selectable}
         if not options:
             return self.async_abort(reason="no_objects_found")
+
+        # Pre-tick the points already configured for this device so the picker
+        # edits the existing selection instead of starting from scratch.
+        existing = next(
+            (d for d in self._devices if d.device_id == device.device_id), None
+        )
+        existing_points = existing.points if existing else []
+        existing_ids = {p.object_id for p in existing_points}
+        default_points = [oid for oid in options if oid in existing_ids]
+        default_name = existing.name if existing else device.name
+        default_cov = any(p.use_cov for p in existing_points)
+        default_priority = (
+            existing_points[0].write_priority
+            if existing_points
+            else DEFAULT_WRITE_PRIORITY
+        )
+
         return self.async_show_form(
             step_id="select_points",
             data_schema=vol.Schema(
                 {
-                    vol.Required("points", default=[]): cv.multi_select(options),
-                    vol.Optional(CONF_USE_COV, default=False): bool,
+                    vol.Optional(CONF_DEVICE_NAME, default=default_name): str,
+                    vol.Required(
+                        "points", default=default_points
+                    ): cv.multi_select(options),
+                    vol.Optional(CONF_USE_COV, default=default_cov): bool,
                     vol.Optional(
-                        CONF_WRITE_PRIORITY, default=DEFAULT_WRITE_PRIORITY
+                        CONF_WRITE_PRIORITY, default=default_priority
                     ): vol.All(
                         int,
                         vol.Range(min=MIN_WRITE_PRIORITY, max=MAX_WRITE_PRIORITY),

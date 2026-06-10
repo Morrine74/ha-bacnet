@@ -26,8 +26,15 @@
         "menu_options": {
           "discover": "Discover and add a device",
           "add_by_ip": "Add a device by IP address",
+          "manage_device": "Manage a device (add/remove points, rename)",
           "settings": "Polling settings",
           "remove_device": "Remove a device"
+        }
+      },
+      "manage_device": {
+        "title": "Manage a device",
+        "data": {
+          "device": "Device"
         }
       },
       "discover": {
@@ -46,8 +53,9 @@
       },
       "select_points": {
         "title": "Select points",
-        "description": "Choose the objects to monitor on {device}.",
+        "description": "Choose the objects to monitor on {device}. Already-configured points are pre-selected; tick or untick to add or remove.",
         "data": {
+          "device_name": "Device name",
           "points": "Points",
           "use_cov": "Use Change-Of-Value subscriptions",
           "write_priority": "Default write priority"
@@ -70,7 +78,7 @@
       "not_loaded": "The integration must be loaded to discover devices.",
       "no_devices_found": "No BACnet devices answered the Who-Is broadcast.",
       "no_objects_found": "No objects were found on the selected device.",
-      "no_devices_configured": "There are no configured devices to remove.",
+      "no_devices_configured": "There are no configured devices.",
       "discovery_failed": "Discovery failed. Check the network configuration.",
       "device_not_found": "No device responded at that IP address."
     }
