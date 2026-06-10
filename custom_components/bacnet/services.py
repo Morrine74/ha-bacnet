@@ -33,7 +33,7 @@ from .const import (
     SERVICE_WRITE_PROPERTY,
     SERVICE_WRITE_SCHEDULE,
 )
-from .hub import BACnetHub, BACnetHubError
+from .hub import BACnetHub, BACnetHubError, _coerce_log_datum
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -258,9 +258,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
 
 def _jsonify(value: Any) -> Any:
     """Convert a bacpypes value into something JSON serialisable."""
-    if value is None or isinstance(value, (int, float, bool, str)):
-        return value
-    for attr in ("value", "realValue", "enumeratedValue", "booleanValue"):
-        if hasattr(value, attr):
-            return getattr(value, attr)
-    return str(value)
+    if isinstance(value, (list, tuple)):
+        return [_jsonify(item) for item in value]
+    # Shares the hub's coercion logic (AnyAtomic/Null unwrapping included).
+    return _coerce_log_datum(value)

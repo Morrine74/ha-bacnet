@@ -683,6 +683,9 @@ def _coerce_log_datum(value: Any) -> Any:
         return None
     if isinstance(value, (int, float, bool, str)):
         return value
+    # BACnet Null (e.g. a schedule's "no action" entry) maps to None.
+    if type(value).__name__.lower() == "null":
+        return None
     # AnyAtomic (Schedule present-value, log data, ...) hides the real value
     # behind get_value(); unwrap before inspecting attributes.
     getter = getattr(value, "get_value", None)
@@ -843,14 +846,21 @@ def _build_weekly_schedule(weekly_schedule: Any, value_type: str) -> Any:
     days are kept as empty lists) so the complete array is written in one shot,
     which is what BACnet controllers expect on the wire.
     """
-    from bacpypes3.basetypes import WeeklySchedule
-
     days = list(weekly_schedule or [])
     # Normalise to exactly 7 days.
     days = (days + [[] for _ in range(7)])[:7]
 
     daily = [_build_daily_schedule(day, value_type) for day in days]
 
+    # Recent bacpypes3 releases (>= ~0.0.100) expose the ARRAY[7] of
+    # DailySchedule as ArrayOfDailySchedule; older ones as WeeklySchedule.
+    try:
+        from bacpypes3.basetypes import ArrayOfDailySchedule
+        return ArrayOfDailySchedule(daily)
+    except ImportError:
+        pass
+
+    from bacpypes3.basetypes import WeeklySchedule
     try:
         return WeeklySchedule(daySchedule=daily)
     except TypeError:
@@ -859,11 +869,18 @@ def _build_weekly_schedule(weekly_schedule: Any, value_type: str) -> Any:
 
 
 def _normalize_time_string(value: Any) -> str:
-    """Coerce a time into the ``HH:MM:SS`` form expected by bacpypes ``Time``."""
+    """Coerce a time into the ``HH:MM:SS`` form expected by bacpypes ``Time``.
+
+    Tolerates fractional seconds ("08:00:00.00", the string form of a bacpypes
+    ``Time``) so a schedule read can be written back unchanged.
+    """
     text = str(value).strip()
     parts = text.split(":")
     while len(parts) < 3:
         parts.append("00")
-    h, m, s = parts[0], parts[1], parts[2]
-    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+    try:
+        h, m, s = (int(float(part)) for part in parts[:3])
+    except ValueError as err:
+        raise BACnetHubError(f"Invalid schedule time {value!r}") from err
+    return f"{h:02d}:{m:02d}:{s:02d}"
 

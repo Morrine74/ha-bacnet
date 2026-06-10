@@ -107,9 +107,18 @@ class BacnetScheduleCard extends HTMLElement {
     this._grid = this._emptyGrid();
     if (this._configured) {
       this._renderShell();
+      // Reload from the device when the target changed (e.g. another schedule
+      // was picked in the visual editor) and hass is already available.
+      if (this._hass && this._loadedKey !== this._targetKey()) {
+        this._loadSchedule();
+      }
     } else {
       this._renderUnconfigured();
     }
+  }
+
+  _targetKey() {
+    return `${this._config.device_address}|${this._config.object_id}`;
   }
 
   static getStubConfig() {
@@ -128,9 +137,11 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   set hass(hass) {
-    const first = this._hass === undefined;
     this._hass = hass;
-    if (first && this._configured) {
+    // First hass after setConfig: load the configured schedule once. The key
+    // is set when a load starts, so a failed load does not retry on every
+    // state change (use the refresh button instead).
+    if (this._configured && this._loadedKey !== this._targetKey()) {
       this._loadSchedule();
     }
   }
@@ -206,7 +217,11 @@ class BacnetScheduleCard extends HTMLElement {
       for (const entry of entries) {
         const start = Math.max(0, Math.min(this._slots, entry.slot));
         for (let s = cursor; s < start; s++) grid[dayIndex][s] = current;
-        current = entry.value;
+        // A null value is BACnet "no action" - render it as the default state.
+        current =
+          entry.value === null || entry.value === undefined
+            ? Number(this._config.default_value)
+            : entry.value;
         cursor = start;
       }
       for (let s = cursor; s < this._slots; s++) grid[dayIndex][s] = current;
@@ -242,6 +257,7 @@ class BacnetScheduleCard extends HTMLElement {
   async _loadSchedule() {
     if (!this._hass || this._loading) return;
     this._loading = true;
+    this._loadedKey = this._targetKey();
     this._error = null;
     this._update();
     try {

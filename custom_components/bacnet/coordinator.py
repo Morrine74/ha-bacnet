@@ -67,9 +67,10 @@ class BACnetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         @callback
         def _handle_cov(payload: dict[str, Any]) -> None:
             if payload.get("property") in ("present-value", "presentValue"):
-                self._cov_values[key] = payload["value"]
+                value = _normalize_value(payload["value"])
+                self._cov_values[key] = value
                 data = dict(self.data or {})
-                data[key] = payload["value"]
+                data[key] = value
                 self.async_set_updated_data(data)
 
         try:
@@ -144,6 +145,10 @@ def _normalize_value(value: Any) -> Any:
     """Convert bacpypes primitives to plain Python values for HA state."""
     if value is None or isinstance(value, (int, float, bool, str)):
         return value
+
+    # BACnet Null (e.g. a relinquished/no-action value) maps to None.
+    if type(value).__name__.lower() == "null":
+        return None
 
     # AnyAtomic (e.g. a Schedule present-value) wraps the real atomic value and
     # exposes it through get_value()/get_value_type(); unwrap it first.
