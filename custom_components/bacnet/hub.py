@@ -16,6 +16,18 @@ from typing import Any
 
 from .const import DEFAULT_REQUEST_TIMEOUT
 
+try:
+    # BACnet protocol errors (unknown-property, write-access-denied, ...) are
+    # raised by bacpypes3 as ErrorRejectAbortNack, which derives from
+    # BaseException - NOT Exception - so a bare ``except Exception`` misses
+    # them. Every request handler below must catch this class explicitly.
+    from bacpypes3.apdu import ErrorRejectAbortNack as _BACnetProtocolError
+except ImportError:  # pragma: no cover - bacpypes3 always present at runtime
+
+    class _BACnetProtocolError(BaseException):
+        """Placeholder when bacpypes3 is not importable (pure unit tests)."""
+
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -186,7 +198,7 @@ class BACnetHub:
                 )
             except asyncio.TimeoutError:
                 i_ams = []
-            except Exception as err:  # noqa: BLE001
+            except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
                 raise BACnetHubError(f"Who-Is failed: {err}") from err
 
         _LOGGER.debug(
@@ -241,7 +253,7 @@ class BACnetHub:
                 f"Reading device instance at {address} timed out "
                 "(no decodable response)"
             ) from err
-        except Exception as err:  # noqa: BLE001
+        except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Could not read device instance at {address}: {err}"
             ) from err
@@ -280,7 +292,7 @@ class BACnetHub:
             raise BACnetHubError(
                 f"Read {prop} of {object_id}@{address} timed out"
             ) from err
-        except Exception as err:  # noqa: BLE001
+        except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Read {prop} of {object_id}@{address} failed: {err}"
             ) from err
@@ -323,7 +335,7 @@ class BACnetHub:
             raise BACnetHubError(
                 f"Write {prop} of {object_id}@{address} timed out"
             ) from err
-        except Exception as err:  # noqa: BLE001
+        except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"Write {prop} of {object_id}@{address} failed: {err}"
             ) from err
@@ -512,7 +524,7 @@ class BACnetHub:
                             )
                 except asyncio.CancelledError:
                     raise
-                except Exception as err:  # noqa: BLE001
+                except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
                     _LOGGER.debug(
                         "COV subscription for %s lost (%s); retrying", key, err
                     )
@@ -671,7 +683,7 @@ class BACnetHub:
             raise BACnetHubError(
                 "AcknowledgeAlarm is not supported by this bacpypes3 build"
             ) from err
-        except Exception as err:  # noqa: BLE001
+        except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
             raise BACnetHubError(
                 f"AcknowledgeAlarm for {object_id}@{address} failed: {err}"
             ) from err
