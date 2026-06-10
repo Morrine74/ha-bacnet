@@ -122,13 +122,10 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    // Sample configuration used by the card picker preview.
-    return {
-      device_address: "192.168.0.99",
-      object_id: "schedule,1",
-      title: "BACnet Schedule",
-      resolution: 30,
-    };
+    // Intentionally unconfigured: the add-card preview then shows the help
+    // hint instead of firing read_schedule at a placeholder address (which
+    // kept the preview "loading" until the request timed out).
+    return {};
   }
 
   static getConfigElement() {
@@ -273,7 +270,15 @@ class BacnetScheduleCard extends HTMLElement {
         true
       );
       const data = (response && response.response) || response || {};
-      this._grid = this._scheduleToGrid(data.weekly_schedule);
+      if (data.weekly_schedule == null) {
+        // The service replied but every property read failed: wrong object id
+        // or the device did not answer.
+        this._grid = this._emptyGrid();
+        this._error =
+          "No schedule data received - check the device address and object id";
+      } else {
+        this._grid = this._scheduleToGrid(data.weekly_schedule);
+      }
       this._valueType = data.value_type || null;
       this._dirty = false;
     } catch (err) {

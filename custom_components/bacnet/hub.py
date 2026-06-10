@@ -303,6 +303,16 @@ class BACnetHub:
         """Convenience wrapper to read the present-value property."""
         return await self.async_read_property(address, object_id, "present-value")
 
+    async def _async_read_optional(
+        self, address: str, object_id: str, prop: str
+    ) -> Any:
+        """Read a property, returning None instead of raising on failure."""
+        try:
+            return await self.async_read_property(address, object_id, prop)
+        except BACnetHubError as err:
+            _LOGGER.debug("Optional read %s of %s: %s", prop, object_id, err)
+            return None
+
     async def async_write_property(
         self,
         address: str,
@@ -586,26 +596,14 @@ class BACnetHub:
         tells the caller (and the Lovelace card) which primitive datatype the
         schedule entries use, so a later write can be typed identically.
         """
-        weekly = None
-        exception = None
-        present_value = None
-        schedule_default = None
-        with suppress(BACnetHubError):
-            weekly = await self.async_read_property(
-                address, object_id, "weekly-schedule"
-            )
-        with suppress(BACnetHubError):
-            exception = await self.async_read_property(
-                address, object_id, "exception-schedule"
-            )
-        with suppress(BACnetHubError):
-            present_value = await self.async_read_property(
-                address, object_id, "present-value"
-            )
-        with suppress(BACnetHubError):
-            schedule_default = await self.async_read_property(
-                address, object_id, "schedule-default"
-            )
+        # Read all four properties in parallel: on an unreachable device the
+        # whole call is then bounded by one request timeout, not four.
+        weekly, exception, present_value, schedule_default = await asyncio.gather(
+            self._async_read_optional(address, object_id, "weekly-schedule"),
+            self._async_read_optional(address, object_id, "exception-schedule"),
+            self._async_read_optional(address, object_id, "present-value"),
+            self._async_read_optional(address, object_id, "schedule-default"),
+        )
 
         value_type = _bacpypes_type_name(schedule_default)
         if value_type is None:

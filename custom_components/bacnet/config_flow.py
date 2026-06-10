@@ -43,6 +43,19 @@ from .models import DeviceConfig, PointConfig, devices_from_options
 _LOGGER = logging.getLogger(__name__)
 
 
+def _point_label(obj: Any) -> str:
+    """Build the picker label for a discovered object.
+
+    The description (when the device provides one) is usually far more
+    readable than the BACnet object-name, so it comes first; the object-name
+    is kept in parentheses for disambiguation.
+    """
+    if obj.description and obj.name and obj.description != obj.name:
+        return f"{obj.description} ({obj.name}) [{obj.object_id}]"
+    primary = obj.description or obj.name or obj.object_id
+    return f"{primary} [{obj.object_id}]"
+
+
 def _user_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
     return vol.Schema(
@@ -295,7 +308,9 @@ class BACnetOptionsFlow(OptionsFlow):
                     PointConfig(
                         object_type=obj.object_type,
                         instance=obj.instance,
-                        name=obj.name or object_id,
+                        # Prefer the human-readable description over the
+                        # (often cryptic) BACnet object-name.
+                        name=obj.description or obj.name or object_id,
                         use_cov=use_cov,
                         cov_lifetime=DEFAULT_COV_LIFETIME,
                         write_priority=priority,
@@ -346,7 +361,7 @@ class BACnetOptionsFlow(OptionsFlow):
         # services instead. Schedules are included so they can be exposed and
         # edited with the schedule card.
         options = {
-            o.object_id: f"{o.name or o.object_id} [{o.object_type}]"
+            o.object_id: _point_label(o)
             for o in self._discovered_objects
             if o.object_type in SELECTABLE_TYPES
         }
