@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
-from .const import DEFAULT_REQUEST_TIMEOUT
+from .const import (
+    DEFAULT_REQUEST_TIMEOUT,
+    PROP_NODE_TYPE,
+    PROP_SIEMENS_TREE_PATH,
+    SIEMENS_VENDOR_ID,
+    STRUCTURED_VIEW,
+)
+from .siemens import find_equipment_index
 
 try:
     # BACnet protocol errors (unknown-property, write-access-denied, ...) are
@@ -55,6 +63,8 @@ class DiscoveredObject:
     state_text: list[str] | None = None
     active_text: str | None = None
     inactive_text: str | None = None
+    tree_path: list[str] | None = None
+    equipment_index: int | None = None
 
     @property
     def object_id(self) -> str:
@@ -303,6 +313,80 @@ class BACnetHub:
         """Convenience wrapper to read the present-value property."""
         return await self.async_read_property(address, object_id, "present-value")
 
+    async def async_read_tree_path(
+        self, address: str, object_id: str
+    ) -> list[str] | None:
+        """Read the Siemens proprietary tree-path property (4397).
+
+        bacpypes3 has no datatype registered for this proprietary property, so
+        its high-level ``read_property`` returns the placeholder
+        ``"-no property type-"`` instead of the value. We therefore issue the
+        ReadProperty at the APDU level and cast the raw ``Any`` out ourselves as
+        an ``ArrayOf(CharacterString)`` - the encoding Siemens uses on the wire.
+        Never raises: any failure (non-Siemens, unknown-property, undecodable)
+        returns ``None`` so discovery is unaffected.
+        """
+        from bacpypes3.apdu import ReadPropertyACK, ReadPropertyRequest
+        from bacpypes3.constructeddata import ArrayOf
+        from bacpypes3.pdu import Address
+        from bacpypes3.primitivedata import (
+            CharacterString,
+            ObjectIdentifier,
+            PropertyIdentifier,
+        )
+
+        app = self._require_app()
+        obj_type, instance = self._parse_object_id(object_id)
+        request = ReadPropertyRequest(
+            objectIdentifier=ObjectIdentifier(f"{obj_type},{instance}"),
+            propertyIdentifier=PropertyIdentifier(PROP_SIEMENS_TREE_PATH),
+            destination=Address(address),
+        )
+        try:
+            response = await asyncio.wait_for(
+                app.request(request), timeout=DEFAULT_REQUEST_TIMEOUT
+            )
+        except (asyncio.TimeoutError, _BACnetProtocolError, Exception) as err:  # noqa: BLE001
+            _LOGGER.debug("Tree-path read of %s@%s failed: %s", object_id, address, err)
+            return None
+
+        if not isinstance(response, ReadPropertyACK):
+            return None
+        try:
+            raw = response.propertyValue.cast_out(ArrayOf(CharacterString))
+        except Exception as err:  # noqa: BLE001 - undecodable proprietary value
+            _LOGGER.debug("Could not decode tree-path of %s: %s", object_id, err)
+            return None
+        return _decode_tree_path(raw)
+
+    async def _async_structured_view_types(
+        self, address: str, object_ids: list[str]
+    ) -> dict[str, str]:
+        """Map each structured-view's object-name to its node-type token.
+
+        Siemens describes the plant tree with structured-view (type 29) objects;
+        ``node-type`` ("system" for an installation, "functional" for a
+        sub-part, "building"/"floor"/... for location) tells us where to draw the
+        equipment boundary. Failures are skipped so discovery is never blocked.
+        """
+        result: dict[str, str] = {}
+        for object_id in object_ids:
+            if not object_id.startswith(STRUCTURED_VIEW):
+                continue
+            name = None
+            with suppress(BACnetHubError):
+                name = str(
+                    await self.async_read_property(address, object_id, "object-name")
+                )
+            if not name:
+                continue
+            with suppress(BACnetHubError):
+                node_type = await self.async_read_property(
+                    address, object_id, PROP_NODE_TYPE
+                )
+                result[name] = _node_type_token(node_type)
+        return result
+
     async def _async_read_optional(
         self, address: str, object_id: str, prop: str
     ) -> Any:
@@ -396,10 +480,22 @@ class BACnetHub:
         return result
 
     async def async_discover_objects(
-        self, address: str, device_id: int
+        self, address: str, device_id: int, vendor_id: int | None = None
     ) -> list[DiscoveredObject]:
-        """Discover objects on a device and read their friendly metadata."""
+        """Discover objects on a device and read their friendly metadata.
+
+        For Siemens devices (``vendor_id == 7``) the proprietary tree-path
+        property (4397) is read as well, so points can be grouped by equipment.
+        It is skipped for other vendors to avoid an unknown-property round-trip
+        per object.
+        """
+        is_siemens = vendor_id == SIEMENS_VENDOR_ID
         object_ids = await self.async_object_list(address, device_id)
+        sv_node_types: dict[str, str] = {}
+        if is_siemens:
+            sv_node_types = await self._async_structured_view_types(
+                address, object_ids
+            )
         objects: list[DiscoveredObject] = []
         for object_id in object_ids:
             try:
@@ -415,12 +511,18 @@ class BACnetHub:
             state_text = None
             active_text = None
             inactive_text = None
+            tree_path = None
+            equipment_index = None
+            if is_siemens:
+                tree_path = await self.async_read_tree_path(address, object_id)
             with suppress(BACnetHubError):
                 name = str(
                     await self.async_read_property(
                         address, object_id, "object-name"
                     )
                 )
+            if is_siemens and name:
+                equipment_index = find_equipment_index(name, sv_node_types)
             with suppress(BACnetHubError):
                 description = str(
                     await self.async_read_property(
@@ -463,6 +565,8 @@ class BACnetHub:
                     state_text=state_text,
                     active_text=active_text,
                     inactive_text=inactive_text,
+                    tree_path=tree_path,
+                    equipment_index=equipment_index,
                 )
             )
         return objects
@@ -709,6 +813,37 @@ def _coerce_log_datum(value: Any) -> Any:
     with suppress(Exception):
         return float(value)
     return str(value)
+
+
+def _decode_tree_path(raw: Any) -> list[str] | None:
+    """Normalise a decoded 4397 value into a clean list of path segments.
+
+    Accepts the usual ``ArrayOf(CharacterString)`` (a list-like of bacpypes
+    ``CharacterString``) and, defensively, a single delimited string. Returns
+    ``None`` when nothing usable can be extracted.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        parts = [p.strip() for p in re.split(r"['/\\|]", raw)]
+        parts = [p for p in parts if p]
+        return parts or None
+    try:
+        segments = [str(item).strip() for item in raw]
+    except TypeError:
+        return None
+    segments = [s for s in segments if s]
+    return segments or None
+
+
+def _node_type_token(value: Any) -> str:
+    """Extract the bare node-type token from a bacpypes NodeType value.
+
+    bacpypes renders the enum as e.g. ``<NodeType: system>`` or ``system``; we
+    keep the last alphabetic token ("system", "functional", "building", ...).
+    """
+    tokens = re.findall(r"[A-Za-z][A-Za-z-]*", str(value))
+    return tokens[-1].casefold() if tokens else ""
 
 
 def _object_ids_to_str(ids: Any) -> list[str]:

@@ -143,6 +143,35 @@ def test_build_weekly_schedule_round_trip_with_real_bacpypes():
     assert hub._serialize_weekly_schedule(rebuilt) == serialized
 
 
+def test_decode_tree_path_from_list():
+    # The usual case: an ArrayOf(CharacterString) arrives as a list-like.
+    assert hub._decode_tree_path(["Gymnase", "Locaux Techniques", "Chaudière"]) == [
+        "Gymnase",
+        "Locaux Techniques",
+        "Chaudière",
+    ]
+    # Blank / whitespace-only segments are dropped.
+    assert hub._decode_tree_path(["A", "  ", "", "B"]) == ["A", "B"]
+
+
+def test_decode_tree_path_empty_and_none():
+    assert hub._decode_tree_path(None) is None
+    assert hub._decode_tree_path([]) is None
+    assert hub._decode_tree_path(["", "  "]) is None
+
+
+def test_decode_tree_path_string_fallback():
+    # Defensive: a single apostrophe-delimited string still splits.
+    assert hub._decode_tree_path("Gym'LT'HGen") == ["Gym", "LT", "HGen"]
+
+
+def test_node_type_token_extracts_enum_name():
+    assert hub._node_type_token("<NodeType: system>") == "system"
+    assert hub._node_type_token("system") == "system"
+    assert hub._node_type_token("<NodeType: functional>") == "functional"
+    assert hub._node_type_token("") == ""
+
+
 def test_object_ids_to_str_handles_tuples_and_strings():
     assert hub._object_ids_to_str(
         [("analog-input", 1), ("binary-value", 4)]

@@ -30,6 +30,8 @@ CONF_DESCRIPTION: Final = "description"
 CONF_STATE_TEXT: Final = "state_text"
 CONF_ACTIVE_TEXT: Final = "active_text"
 CONF_INACTIVE_TEXT: Final = "inactive_text"
+CONF_TREE_PATH: Final = "tree_path"
+CONF_EQUIPMENT_INDEX: Final = "equipment_index"
 
 # Defaults
 DEFAULT_LOCAL_OBJECT_ID: Final = 599
@@ -48,6 +50,17 @@ MIN_WRITE_PRIORITY: Final = 1
 MAX_WRITE_PRIORITY: Final = 16
 
 UPDATE_INTERVAL: Final = timedelta(seconds=DEFAULT_SCAN_INTERVAL)
+
+# Siemens grouping support.
+# - 4397 is a proprietary property holding a point's friendly tree path
+#   (ArrayOf CharacterString). bacpypes3 has no datatype registered for it, so the
+#   hub reads it at the APDU level and casts the value out itself.
+# - structured-view (type 29) objects describe the plant tree; their standard
+#   node-type property authoritatively flags the installation level ("system").
+SIEMENS_VENDOR_ID: Final = 7
+PROP_SIEMENS_TREE_PATH: Final = 4397
+STRUCTURED_VIEW: Final = "structured-view"
+PROP_NODE_TYPE: Final = "node-type"
 
 # BACnet present-value property identifier
 PROP_PRESENT_VALUE: Final = "present-value"

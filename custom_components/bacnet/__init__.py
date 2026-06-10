@@ -75,6 +75,7 @@ async def async_setup_entry(
     entry.runtime_data = BACnetRuntimeData(hub=hub, coordinator=coordinator)
 
     _async_register_hub_device(hass, entry)
+    _async_register_devices(hass, entry, coordinator)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
@@ -107,6 +108,48 @@ def _async_register_hub_device(
         configuration_url=None,
         sw_version=str(local_ip) if local_ip else None,
     )
+
+
+def _async_register_devices(
+    hass: HomeAssistant, entry: BACnetConfigEntry, coordinator: BACnetCoordinator
+) -> None:
+    """Register controller and equipment sub-devices in the device registry.
+
+    Entities reference their parent via ``via_device``; Home Assistant warns when
+    a referenced device does not yet exist. We therefore pre-create every
+    controller (``entry_id_<device_id>``) and, for Siemens points carrying a tree
+    path, every equipment sub-device (``entry_id_<equipment_slug>``) nested under
+    its controller and placed in the suggested area.
+    """
+    from .entity import point_grouping
+
+    device_registry = dr.async_get(hass)
+    seen_equipment: set[str] = set()
+
+    for device in coordinator.devices:
+        controller_identifier = (DOMAIN, f"{entry.entry_id}_{device.device_id}")
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={controller_identifier},
+            manufacturer=MANUFACTURER,
+            name=device.name,
+            model=f"Device {device.device_id}",
+            via_device=(DOMAIN, entry.entry_id),
+        )
+        for point in device.points:
+            split, slug = point_grouping(device.device_id, point)
+            if not slug or slug in seen_equipment:
+                continue
+            seen_equipment.add(slug)
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{entry.entry_id}_{slug}")},
+                manufacturer=MANUFACTURER,
+                name=split.equipment,
+                model="Équipement",
+                suggested_area=split.area,
+                via_device=controller_identifier,
+            )
 
 
 async def async_unload_entry(

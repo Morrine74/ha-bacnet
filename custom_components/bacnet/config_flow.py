@@ -46,10 +46,12 @@ _LOGGER = logging.getLogger(__name__)
 def _point_label(obj: Any) -> str:
     """Build the picker label for a discovered object.
 
-    The description (when the device provides one) is usually far more
-    readable than the BACnet object-name, so it comes first; the object-name
-    is kept in parentheses for disambiguation.
+    When a Siemens tree path is available it is the clearest disambiguator (it
+    spells out the full location/equipment/point chain), so it leads. Otherwise
+    the description leads, with the object-name kept in parentheses.
     """
+    if getattr(obj, "tree_path", None):
+        return f"{' / '.join(obj.tree_path)} [{obj.object_id}]"
     if obj.description and obj.name and obj.description != obj.name:
         return f"{obj.description} ({obj.name}) [{obj.object_id}]"
     primary = obj.description or obj.name or obj.object_id
@@ -145,6 +147,7 @@ class BACnetOptionsFlow(OptionsFlow):
         )
         self._discovered: list[Any] = []
         self._selected_device: DeviceConfig | None = None
+        self._selected_vendor_id: int | None = None
         self._discovered_objects: list[Any] = []
 
     def _hub(self) -> BACnetHub | None:
@@ -202,6 +205,15 @@ class BACnetOptionsFlow(OptionsFlow):
                 address=address,
                 name=f"BACnet Device {device_id}",
             )
+            match = next(
+                (
+                    d
+                    for d in self._discovered
+                    if str(d.device_id) == device_id and d.address == address
+                ),
+                None,
+            )
+            self._selected_vendor_id = match.vendor_id if match else None
             return await self.async_step_select_points()
 
         try:
@@ -254,6 +266,7 @@ class BACnetOptionsFlow(OptionsFlow):
                 if found:
                     device_id = found[0].device_id
                     address = found[0].address
+                    self._selected_vendor_id = found[0].vendor_id
                 elif device_id is None:
                     device_id = await hub.async_read_device_instance(address)
             except BACnetHubError:
@@ -319,6 +332,8 @@ class BACnetOptionsFlow(OptionsFlow):
                         state_text=obj.state_text,
                         active_text=obj.active_text,
                         inactive_text=obj.inactive_text,
+                        tree_path=obj.tree_path,
+                        equipment_index=obj.equipment_index,
                     )
                 )
             device.points = points
@@ -333,7 +348,7 @@ class BACnetOptionsFlow(OptionsFlow):
 
         try:
             self._discovered_objects = await hub.async_discover_objects(
-                device.address, device.device_id
+                device.address, device.device_id, self._selected_vendor_id
             )
         except BACnetHubError as err:
             _LOGGER.warning(

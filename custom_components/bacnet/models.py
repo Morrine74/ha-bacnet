@@ -10,6 +10,7 @@ from .const import (
     CONF_COV_LIFETIME,
     CONF_DESCRIPTION,
     CONF_DEVICE_ADDRESS,
+    CONF_EQUIPMENT_INDEX,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_INACTIVE_TEXT,
@@ -18,6 +19,7 @@ from .const import (
     CONF_OBJECT_TYPE,
     CONF_OBJECTS,
     CONF_STATE_TEXT,
+    CONF_TREE_PATH,
     CONF_UNITS,
     CONF_USE_COV,
     CONF_WRITE_PRIORITY,
@@ -42,6 +44,8 @@ class PointConfig:
     state_text: list[str] | None = None
     active_text: str | None = None
     inactive_text: str | None = None
+    tree_path: list[str] | None = None
+    equipment_index: int | None = None
 
     @property
     def object_id(self) -> str:
@@ -67,6 +71,8 @@ class PointConfig:
             CONF_STATE_TEXT: self.state_text,
             CONF_ACTIVE_TEXT: self.active_text,
             CONF_INACTIVE_TEXT: self.inactive_text,
+            CONF_TREE_PATH: self.tree_path,
+            CONF_EQUIPMENT_INDEX: self.equipment_index,
         }
 
     @classmethod
@@ -86,6 +92,8 @@ class PointConfig:
             state_text=data.get(CONF_STATE_TEXT),
             active_text=data.get(CONF_ACTIVE_TEXT),
             inactive_text=data.get(CONF_INACTIVE_TEXT),
+            tree_path=data.get(CONF_TREE_PATH),
+            equipment_index=data.get(CONF_EQUIPMENT_INDEX),
         )
 
 
