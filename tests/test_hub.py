@@ -143,6 +143,19 @@ def test_build_weekly_schedule_round_trip_with_real_bacpypes():
     assert hub._serialize_weekly_schedule(rebuilt) == serialized
 
 
+def test_ensure_cidr_adds_default_prefix():
+    # A bare host gets /24 (otherwise bacpypes3 cannot broadcast Who-Is).
+    assert hub._ensure_cidr("192.168.0.216") == "192.168.0.216/24"
+    # An explicit prefix is preserved.
+    assert hub._ensure_cidr("192.168.0.216/16") == "192.168.0.216/16"
+    # Surrounding whitespace is trimmed.
+    assert hub._ensure_cidr("  10.0.0.5  ") == "10.0.0.5/24"
+    # A port without a prefix keeps the port after the inserted mask.
+    assert hub._ensure_cidr("192.168.0.216:47808") == "192.168.0.216/24:47808"
+    # Empty stays empty (validated/handled elsewhere).
+    assert hub._ensure_cidr("") == ""
+
+
 def test_decode_tree_path_from_list():
     # The usual case: an ArrayOf(CharacterString) arrives as a list-like.
     assert hub._decode_tree_path(["Gymnase", "Locaux Techniques", "Chaudière"]) == [

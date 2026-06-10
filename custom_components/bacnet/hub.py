@@ -101,7 +101,10 @@ class BACnetHub:
         bbmd_ttl: int = 30,
     ) -> None:
         """Initialise the hub configuration (no network I/O yet)."""
-        self._local_ip = local_ip
+        # Without a CIDR prefix bacpypes3 cannot compute the broadcast address
+        # and Who-Is broadcasts silently fail ("no broadcast"), so directed
+        # reads work but Discover finds nothing. Default to /24 when omitted.
+        self._local_ip = _ensure_cidr(local_ip)
         self._object_id = object_id
         self._object_name = object_name
         self._bbmd_address = bbmd_address
@@ -834,6 +837,21 @@ def _decode_tree_path(raw: Any) -> list[str] | None:
         return None
     segments = [s for s in segments if s]
     return segments or None
+
+
+def _ensure_cidr(local_ip: str) -> str:
+    """Ensure a local IP carries a CIDR prefix (default ``/24``).
+
+    bacpypes3 needs the prefix length to derive the subnet broadcast address;
+    without it a Who-Is broadcast raises ``RuntimeError("no broadcast")`` and
+    discovery returns nothing. A bare host (optionally ``host:port``) gets a
+    ``/24`` so the common LAN case just works; an explicit prefix is kept as-is.
+    """
+    ip = (local_ip or "").strip()
+    if not ip or "/" in ip:
+        return ip
+    host, sep, port = ip.partition(":")
+    return f"{host}/24{sep}{port}"
 
 
 def _node_type_token(value: Any) -> str:
