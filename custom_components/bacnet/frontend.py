@@ -2,8 +2,19 @@
 
 Installing the integration is enough to make the BACnet schedule card available
 in the dashboard: the JavaScript module is served by Home Assistant itself and
-registered as an extra frontend module, so the user does not have to add a
-Lovelace resource manually.
+registered as a *persistent* Lovelace resource (the same mechanism HACS uses).
+
+Persistence matters: the previous approach (``add_extra_js_url``) only lives in
+memory and is injected into ``index.html``, which the frontend service worker
+caches aggressively. Any boot where the integration was not yet set up when the
+browser loaded the page - or any client with a cached index.html - showed
+"Configuration error: custom element doesn't exist" until a hard refresh. A
+storage-mode Lovelace resource is loaded by every dashboard on every page load,
+independent of the integration's own setup state, so the card keeps working
+even when the BACnet entry is still retrying.
+
+``add_extra_js_url`` is kept as a fallback for YAML-mode dashboards, where the
+resource collection is read-only (those users manage resources in YAML anyway).
 """
 
 from __future__ import annotations
@@ -11,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
@@ -41,7 +53,12 @@ async def _async_integration_version(hass: HomeAssistant) -> str:
 
 
 async def async_register_card(hass: HomeAssistant) -> None:
-    """Serve the card file and add it to the frontend's extra modules once."""
+    """Serve the card file and register it with the frontend once.
+
+    Must be called *before* anything in the entry setup that can raise
+    ``ConfigEntryNotReady``: the card has to stay available on dashboards even
+    while the BACnet stack itself is still retrying.
+    """
     if hass.data.get(_REGISTERED_KEY):
         return
 
@@ -55,15 +72,74 @@ async def async_register_card(hass: HomeAssistant) -> None:
     # Append a version query string so browsers reload the card after upgrades.
     version = await _async_integration_version(hass)
     versioned_url = f"{CARD_URL_PATH}?v={version}"
-    _add_extra_module(hass, versioned_url)
+
+    if await _async_register_lovelace_resource(hass, versioned_url):
+        _LOGGER.debug("BACnet card registered as a Lovelace resource")
+    else:
+        # Lovelace is not ready yet (startup ordering) or runs in YAML mode.
+        # Fall back to an extra module now, and retry the persistent resource
+        # once Home Assistant has fully started. The card guards against being
+        # defined twice, so a double load is harmless.
+        _add_extra_module(hass, versioned_url)
+        if not hass.is_running:
+
+            async def _retry(_event) -> None:
+                await _async_register_lovelace_resource(hass, versioned_url)
+
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry)
 
     hass.data[_REGISTERED_KEY] = True
-    _LOGGER.info(
-        "BACnet schedule card served at %s and registered with the frontend. "
-        "If the card shows 'Custom element not found', hard-refresh your "
-        "browser (Ctrl+Shift+R) to reload the frontend.",
-        CARD_URL_PATH,
-    )
+    _LOGGER.info("BACnet schedule card served at %s", CARD_URL_PATH)
+
+
+async def _async_register_lovelace_resource(
+    hass: HomeAssistant, url: str
+) -> bool:
+    """Add/refresh the card in the Lovelace resource storage collection.
+
+    Returns True when the resource is present (created, updated or already
+    current); False when the collection is unavailable (YAML mode, lovelace
+    not loaded yet, or an unexpected API shape).
+    """
+    resources = _resource_collection(hass)
+    if resources is None:
+        return False
+    # YAML-mode resource collections are read-only.
+    if not hasattr(resources, "async_create_item"):
+        return False
+
+    try:
+        if hasattr(resources, "loaded") and not resources.loaded:
+            await resources.async_load()
+            resources.loaded = True
+
+        base_url = url.split("?")[0]
+        for item in resources.async_items():
+            item_url = str(item.get("url", ""))
+            if item_url.split("?")[0] != base_url:
+                continue
+            if item_url != url:
+                # Same card, older version string: refresh to bust caches.
+                await resources.async_update_item(item["id"], {"url": url})
+            return True
+
+        await resources.async_create_item({"res_type": "module", "url": url})
+        return True
+    except Exception as err:  # noqa: BLE001 - never break entry setup
+        _LOGGER.warning("Could not register the Lovelace resource: %s", err)
+        return False
+
+
+def _resource_collection(hass: HomeAssistant):
+    """Return the Lovelace resource collection across HA versions, or None."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        return None
+    # 2024.2+: LovelaceData dataclass; before: plain dict.
+    resources = getattr(lovelace, "resources", None)
+    if resources is None and isinstance(lovelace, dict):
+        resources = lovelace.get("resources")
+    return resources
 
 
 async def _async_serve_card(hass: HomeAssistant, card_path: str) -> None:
@@ -110,4 +186,3 @@ def _add_extra_module(hass: HomeAssistant, url: str) -> None:
             err,
             url,
         )
-

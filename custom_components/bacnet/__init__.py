@@ -49,6 +49,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: BACnetConfigEntry
 ) -> bool:
     """Set up BACnet from a config entry."""
+    # Serve and register the bundled Lovelace card first: it must stay
+    # available on dashboards even when the BACnet stack below raises
+    # ConfigEntryNotReady (e.g. network not up yet after a reboot). Doing this
+    # last was the cause of intermittent "custom element doesn't exist" errors.
+    await async_register_card(hass)
+
     local_ip = entry.data.get(CONF_LOCAL_IP) or entry.data.get(CONF_IP_ADDRESS)
     hub = BACnetHub(
         local_ip=local_ip,
@@ -79,10 +85,6 @@ async def async_setup_entry(
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
-
-    # Serve and register the bundled Lovelace card so it is available without
-    # the user having to add a dashboard resource manually.
-    await async_register_card(hass)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
