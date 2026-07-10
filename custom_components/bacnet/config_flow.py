@@ -167,9 +167,64 @@ class BACnetOptionsFlow(OptionsFlow):
                 "discover",
                 "add_by_ip",
                 "manage_device",
+                "rename_device",
                 "settings",
                 "remove_device",
             ],
+        )
+
+    async def async_step_rename_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a configured device to rename (no discovery round-trip)."""
+        if not self._devices:
+            return self.async_abort(reason="no_devices_configured")
+
+        if user_input is not None:
+            device = next(
+                (
+                    d
+                    for d in self._devices
+                    if d.device_id == int(user_input["device"])
+                ),
+                None,
+            )
+            if device is None:
+                return self.async_abort(reason="no_devices_configured")
+            self._selected_device = device
+            return await self.async_step_rename_device_name()
+
+        options = {
+            str(d.device_id): f"{d.name} ({d.address})" for d in self._devices
+        }
+        return self.async_show_form(
+            step_id="rename_device",
+            data_schema=vol.Schema({vol.Required("device"): vol.In(options)}),
+        )
+
+    async def async_step_rename_device_name(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Save the new name of the selected device immediately."""
+        device = self._selected_device
+        assert device is not None
+
+        if user_input is not None:
+            new_name = (user_input.get(CONF_DEVICE_NAME) or "").strip()
+            if new_name:
+                device.name = new_name
+            return self._save(
+                {CONF_DEVICES: [d.to_dict() for d in self._devices]}
+            )
+
+        return self.async_show_form(
+            step_id="rename_device_name",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_DEVICE_NAME, default=device.name): str}
+            ),
+            description_placeholders={
+                "device": f"{device.name} ({device.address})"
+            },
         )
 
     async def async_step_manage_device(
@@ -358,10 +413,27 @@ class BACnetOptionsFlow(OptionsFlow):
         assert hub is not None and self._selected_device is not None
         device = self._selected_device
 
+        # Settings of already-configured points must survive an edit: the form
+        # shows one global COV/priority pair, so it only overrides per-point
+        # values when the user actually changed it from the prefilled default.
+        existing = next(
+            (d for d in self._devices if d.device_id == device.device_id), None
+        )
+        existing_points = existing.points if existing else []
+        existing_by_id = {p.object_id: p for p in existing_points}
+        prefill_cov = any(p.use_cov for p in existing_points)
+        prefill_priority = (
+            existing_points[0].write_priority
+            if existing_points
+            else DEFAULT_WRITE_PRIORITY
+        )
+
         if user_input is not None:
             chosen = user_input.get("points", [])
             use_cov = user_input.get(CONF_USE_COV, False)
             priority = user_input.get(CONF_WRITE_PRIORITY, DEFAULT_WRITE_PRIORITY)
+            cov_changed = use_cov != prefill_cov
+            priority_changed = priority != prefill_priority
             new_name = (user_input.get(CONF_DEVICE_NAME) or "").strip()
             if new_name:
                 device.name = new_name
@@ -371,16 +443,31 @@ class BACnetOptionsFlow(OptionsFlow):
                 obj = lookup.get(object_id)
                 if not obj:
                     continue
+                prev = existing_by_id.get(object_id)
                 points.append(
                     PointConfig(
                         object_type=obj.object_type,
                         instance=obj.instance,
-                        # Prefer the human-readable description over the
-                        # (often cryptic) BACnet object-name.
-                        name=obj.description or obj.name or object_id,
-                        use_cov=use_cov,
-                        cov_lifetime=DEFAULT_COV_LIFETIME,
-                        write_priority=priority,
+                        # Keep the configured name; for new points prefer the
+                        # human-readable description over the (often cryptic)
+                        # BACnet object-name.
+                        name=(prev.name if prev else None)
+                        or obj.description
+                        or obj.name
+                        or object_id,
+                        use_cov=(
+                            use_cov
+                            if prev is None or cov_changed
+                            else prev.use_cov
+                        ),
+                        cov_lifetime=(
+                            prev.cov_lifetime if prev else DEFAULT_COV_LIFETIME
+                        ),
+                        write_priority=(
+                            priority
+                            if prev is None or priority_changed
+                            else prev.write_priority
+                        ),
                         units=obj.units,
                         description=obj.description,
                         state_text=obj.state_text,
@@ -443,19 +530,33 @@ class BACnetOptionsFlow(OptionsFlow):
 
         # Pre-tick the points already configured for this device so the picker
         # edits the existing selection instead of starting from scratch.
-        existing = next(
-            (d for d in self._devices if d.device_id == device.device_id), None
-        )
-        existing_points = existing.points if existing else []
-        existing_ids = {p.object_id for p in existing_points}
-        default_points = [oid for oid in options if oid in existing_ids]
+        default_points = [oid for oid in options if oid in existing_by_id]
         default_name = existing.name if existing else device.name
-        default_cov = any(p.use_cov for p in existing_points)
-        default_priority = (
-            existing_points[0].write_priority
-            if existing_points
-            else DEFAULT_WRITE_PRIORITY
-        )
+
+        # A searchable multi-select dropdown: with hundreds of points on a
+        # controller, the old flat checkbox list was unusable.
+        points_selector: Any
+        try:
+            from homeassistant.helpers.selector import (
+                SelectOptionDict,
+                SelectSelector,
+                SelectSelectorConfig,
+                SelectSelectorMode,
+            )
+
+            points_selector = SelectSelector(
+                SelectSelectorConfig(
+                    options=[
+                        SelectOptionDict(value=oid, label=label)
+                        for oid, label in options.items()
+                    ],
+                    multiple=True,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    custom_value=False,
+                )
+            )
+        except ImportError:
+            points_selector = cv.multi_select(options)
 
         return self.async_show_form(
             step_id="select_points",
@@ -464,10 +565,10 @@ class BACnetOptionsFlow(OptionsFlow):
                     vol.Optional(CONF_DEVICE_NAME, default=default_name): str,
                     vol.Required(
                         "points", default=default_points
-                    ): cv.multi_select(options),
-                    vol.Optional(CONF_USE_COV, default=default_cov): bool,
+                    ): points_selector,
+                    vol.Optional(CONF_USE_COV, default=prefill_cov): bool,
                     vol.Optional(
-                        CONF_WRITE_PRIORITY, default=default_priority
+                        CONF_WRITE_PRIORITY, default=prefill_priority
                     ): vol.All(
                         int,
                         vol.Range(min=MIN_WRITE_PRIORITY, max=MAX_WRITE_PRIORITY),

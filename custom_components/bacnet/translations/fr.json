@@ -26,7 +26,8 @@
         "menu_options": {
           "discover": "Découvrir et ajouter un périphérique",
           "add_by_ip": "Ajouter un périphérique par adresse IP",
-          "manage_device": "Gérer un périphérique (ajouter/retirer des points, renommer)",
+          "manage_device": "Gérer un périphérique (ajouter/retirer des points)",
+          "rename_device": "Renommer un périphérique",
           "settings": "Paramètres d'interrogation",
           "remove_device": "Supprimer un périphérique"
         }
@@ -39,6 +40,15 @@
         "title": "Gérer un périphérique",
         "data": { "device": "Périphérique" }
       },
+      "rename_device": {
+        "title": "Renommer un périphérique",
+        "data": { "device": "Périphérique" }
+      },
+      "rename_device_name": {
+        "title": "Renommer un périphérique",
+        "description": "Nouveau nom pour {device}.",
+        "data": { "device_name": "Nom du périphérique" }
+      },
       "add_by_ip": {
         "title": "Ajouter un périphérique par IP",
         "description": "Contacte un périphérique directement (unicast), sans passer par la découverte broadcast. Laissez l'instance vide pour la détecter automatiquement.",
@@ -49,7 +59,7 @@
       },
       "select_points": {
         "title": "Sélection des points",
-        "description": "Choisissez les objets à surveiller sur {device}. Les points déjà configurés sont pré-cochés ; cochez ou décochez pour ajouter ou retirer.",
+        "description": "Choisissez les objets à surveiller sur {device}. Les points déjà configurés sont pré-sélectionnés et conservent leurs réglages ; utilisez la recherche pour filtrer.",
         "data": {
           "device_name": "Nom du périphérique",
           "points": "Points",

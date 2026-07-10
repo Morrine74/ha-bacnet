@@ -26,7 +26,8 @@
         "menu_options": {
           "discover": "Discover and add a device",
           "add_by_ip": "Add a device by IP address",
-          "manage_device": "Manage a device (add/remove points, rename)",
+          "manage_device": "Manage a device (add/remove points)",
+          "rename_device": "Rename a device",
           "settings": "Polling settings",
           "remove_device": "Remove a device"
         }
@@ -35,6 +36,19 @@
         "title": "Manage a device",
         "data": {
           "device": "Device"
+        }
+      },
+      "rename_device": {
+        "title": "Rename a device",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "rename_device_name": {
+        "title": "Rename a device",
+        "description": "New name for {device}.",
+        "data": {
+          "device_name": "Device name"
         }
       },
       "discover": {
@@ -53,7 +67,7 @@
       },
       "select_points": {
         "title": "Select points",
-        "description": "Choose the objects to monitor on {device}. Already-configured points are pre-selected; tick or untick to add or remove.",
+        "description": "Choose the objects to monitor on {device}. Already-configured points are pre-selected and keep their settings; use the search box to filter.",
         "data": {
           "device_name": "Device name",
           "points": "Points",
