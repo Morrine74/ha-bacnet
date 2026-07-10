@@ -193,3 +193,97 @@ def test_object_ids_to_str_handles_tuples_and_strings():
     assert hub._object_ids_to_str(["device,99"]) == ["device,99"]
     assert hub._object_ids_to_str(None) == []
 
+
+
+class _MemberRef:
+    """Stand-in for a bacpypes DeviceObjectPropertyReference."""
+
+    def __init__(self, object_identifier, device_identifier=None):
+        self.objectIdentifier = object_identifier
+        self.deviceIdentifier = device_identifier
+
+
+def test_schedule_member_target_local_reference():
+    ref = _MemberRef(("multi-state-value", 12))
+    assert hub._schedule_member_target(ref) == "multi-state-value,12"
+
+
+def test_schedule_member_target_skips_remote_and_malformed():
+    remote = _MemberRef(("binary-value", 3), device_identifier=("device", 99))
+    assert hub._schedule_member_target(remote) is None
+    assert hub._schedule_member_target(_MemberRef(None)) is None
+    assert hub._schedule_member_target(_MemberRef(("analog-value",))) is None
+    assert hub._schedule_member_target(object()) is None
+
+
+def _hub_with_reads(reads):
+    """Build a non-started hub whose optional reads answer from a dict."""
+    instance = hub.BACnetHub(
+        local_ip="192.168.0.10/24", object_id=1, object_name="test"
+    )
+
+    async def _fake_read(address, object_id, prop):
+        return reads.get((object_id, prop))
+
+    instance._async_read_optional = _fake_read
+    return instance
+
+
+def test_schedule_member_texts_from_multistate_member():
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("schedule,1", "list-of-object-property-references"): [
+                _MemberRef(("multi-state-value", 5))
+            ],
+            ("multi-state-value,5", "state-text"): ["Confort", "Réduit", "Hors gel"],
+        }
+    )
+    texts = asyncio.run(
+        instance._async_schedule_member_texts("192.168.0.20", "schedule,1")
+    )
+    assert texts["state_texts"] == ["Confort", "Réduit", "Hors gel"]
+    assert texts["active_text"] is None
+
+
+def test_schedule_member_texts_from_binary_member():
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("schedule,2", "list-of-object-property-references"): [
+                # A remote member is skipped; the local binary supplies texts.
+                _MemberRef(("binary-value", 1), device_identifier=("device", 9)),
+                _MemberRef(("binary-value", 2)),
+            ],
+            ("binary-value,2", "active-text"): "Marche",
+            ("binary-value,2", "inactive-text"): "Arrêt",
+        }
+    )
+    texts = asyncio.run(
+        instance._async_schedule_member_texts("192.168.0.20", "schedule,2")
+    )
+    assert texts["state_texts"] is None
+    assert texts["active_text"] == "Marche"
+    assert texts["inactive_text"] == "Arrêt"
+
+
+def test_schedule_member_texts_none_when_analog_member():
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("schedule,3", "list-of-object-property-references"): [
+                _MemberRef(("analog-value", 7))
+            ],
+        }
+    )
+    texts = asyncio.run(
+        instance._async_schedule_member_texts("192.168.0.20", "schedule,3")
+    )
+    assert texts == {
+        "state_texts": None,
+        "active_text": None,
+        "inactive_text": None,
+    }

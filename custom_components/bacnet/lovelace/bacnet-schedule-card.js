@@ -12,6 +12,12 @@
  *   - Left click (or click + drag) paints the currently selected state.
  *   - Right click opens a context menu (set a state, clear, delete the whole
  *     segment, fill the day, copy/paste a day...).
+ *   - Touch: tap paints a slot, drag paints a range, long-press opens the
+ *     context menu. Use the hour column to scroll the grid.
+ *
+ * Empty (hatched) cells are BACnet "no action": the schedule falls back to its
+ * schedule-default value. They are written back as Null entries, so a
+ * read-modify-write round trip preserves the device's relinquish semantics.
  *
  * It reads/writes through the `bacnet.read_schedule` / `bacnet.write_schedule`
  * services. No build tooling is required: drop this file into `config/www/` and
@@ -27,11 +33,12 @@
  *   object_id: "schedule,1"
  *   title: "AHU-1 Occupancy"
  *   resolution: 30            # minutes per slot (15 / 30 / 60), default 30
- *   default_value: 0          # value used for "empty" slots
- *   states:                   # optional, overrides the default palette
- *     - { label: "Occupied",   value: 1, color: "#BFE3C0" }
- *     - { label: "Standby",    value: 2, color: "#FCE1B6" }
- *     - { label: "Unoccupied", value: 0, color: "#E3EAF2" }
+ *   default_value: 0          # deprecated - empty slots are now BACnet
+ *                             # "no action" (Null) and shown hatched
+ *   states:                   # optional - when omitted, the labels are read
+ *     - { label: "Occupied",   value: 1, color: "#BFE3C0" }   # from the
+ *     - { label: "Standby",    value: 2, color: "#FCE1B6" }   # device's own
+ *     - { label: "Unoccupied", value: 0, color: "#E3EAF2" }   # state texts
  */
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -69,7 +76,7 @@ class BacnetScheduleCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._grid = null; // number[7][slots] of value
+    this._grid = null; // (value|null)[7][slots]; null = "no action" (default)
     this._states = DEFAULT_STATES;
     this._activeStateIndex = 0;
     this._painting = false;
@@ -78,9 +85,21 @@ class BacnetScheduleCard extends HTMLElement {
     this._error = null;
     this._clipboardDay = null;
     this._menu = null;
+    this._exceptionCount = 0;
+    this._touchStart = null; // pending tap/long-press cell for touch input
+    this._longPress = null;
     this._onUp = () => {
       this._painting = false;
+      this._cancelTouch();
     };
+  }
+
+  _cancelTouch() {
+    if (this._longPress) {
+      clearTimeout(this._longPress);
+      this._longPress = null;
+    }
+    this._touchStart = null;
   }
 
   setConfig(config) {
@@ -148,20 +167,22 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   connectedCallback() {
-    window.addEventListener("mouseup", this._onUp);
+    window.addEventListener("pointerup", this._onUp);
+    window.addEventListener("pointercancel", this._onUp);
   }
 
   disconnectedCallback() {
-    window.removeEventListener("mouseup", this._onUp);
+    window.removeEventListener("pointerup", this._onUp);
+    window.removeEventListener("pointercancel", this._onUp);
     this._closeMenu();
   }
 
   // ---- model helpers -------------------------------------------------------
 
   _emptyGrid() {
-    const def = Number(this._config.default_value);
+    // null = BACnet "no action": the device applies its schedule-default.
     return Array.from({ length: 7 }, () =>
-      Array.from({ length: this._slots }, () => def)
+      Array.from({ length: this._slots }, () => null)
     );
   }
 
@@ -180,21 +201,21 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   _stateForValue(value) {
+    if (value === null || value === undefined) return undefined;
     return this._states.find((s) => String(s.value) === String(value));
   }
 
   _colorForValue(value) {
+    if (value === null || value === undefined) return "transparent";
     const state = this._stateForValue(value);
     if (state) return state.color;
-    if (String(value) === String(this._config.default_value)) {
-      return "transparent";
-    }
     // Deterministically pick a fallback pastel for unknown numeric values.
     const idx = Math.abs(_hashCode(String(value))) % PASTEL_FALLBACK.length;
     return PASTEL_FALLBACK[idx];
   }
 
   _labelForValue(value) {
+    if (value === null || value === undefined) return "Default (no action)";
     const state = this._stateForValue(value);
     return state ? state.label : String(value);
   }
@@ -210,15 +231,14 @@ class BacnetScheduleCard extends HTMLElement {
         .map((e) => ({ slot: this._timeToSlot(e.time), value: e.value }))
         .sort((a, b) => a.slot - b.slot);
       let cursor = 0;
-      let current = Number(this._config.default_value);
+      // Days start at schedule-default ("no action") until the first entry.
+      let current = null;
       for (const entry of entries) {
         const start = Math.max(0, Math.min(this._slots, entry.slot));
         for (let s = cursor; s < start; s++) grid[dayIndex][s] = current;
-        // A null value is BACnet "no action" - render it as the default state.
-        current =
-          entry.value === null || entry.value === undefined
-            ? Number(this._config.default_value)
-            : entry.value;
+        // Keep BACnet Null distinct: it means "revert to schedule-default",
+        // not "the default_value of this card".
+        current = entry.value === undefined ? null : entry.value;
         cursor = start;
       }
       for (let s = cursor; s < this._slots; s++) grid[dayIndex][s] = current;
@@ -227,20 +247,22 @@ class BacnetScheduleCard extends HTMLElement {
   }
 
   _gridToSchedule() {
-    const def = Number(this._config.default_value);
     return this._grid.map((day) => {
       const entries = [];
       let previous = null;
       day.forEach((value, slot) => {
         if (slot === 0) {
-          // Only emit a 00:00 entry when the day does not start at default.
-          if (String(value) !== String(def)) {
+          // No 00:00 entry needed when the day starts at "no action": the
+          // schedule reverts to schedule-default at midnight anyway.
+          if (value !== null) {
             entries.push({ time: this._slotToTime(slot) + ":00", value });
           }
           previous = value;
           return;
         }
         if (String(value) !== String(previous)) {
+          // A transition back to null is written as a Null entry ("no
+          // action"), which relinquishes to the device's schedule-default.
           entries.push({ time: this._slotToTime(slot) + ":00", value });
           previous = value;
         }
@@ -280,6 +302,12 @@ class BacnetScheduleCard extends HTMLElement {
         this._grid = this._scheduleToGrid(data.weekly_schedule);
       }
       this._valueType = data.value_type || null;
+      this._applyDeviceStates(data);
+      // Exception schedules (holidays, ...) override the weekly grid on the
+      // device; surface their presence so the grid is not silently wrong.
+      this._exceptionCount = Array.isArray(data.exception_schedule)
+        ? data.exception_schedule.length
+        : 0;
       this._dirty = false;
     } catch (err) {
       this._error = String(err);
@@ -304,14 +332,55 @@ class BacnetScheduleCard extends HTMLElement {
       if (valueType) payload.value_type = valueType;
       await this._hass.callService("bacnet", "write_schedule", payload);
       this._dirty = false;
-      this._update();
+      // Read back what the device actually stored, so "In sync" is earned
+      // rather than assumed (some controllers normalise entries on write).
+      this._loadedKey = null;
+      await this._loadSchedule();
     } catch (err) {
       this._error = String(err);
       this._update();
     }
   }
 
+  _applyDeviceStates(data) {
+    // Follow the device's own vocabulary: the backend resolves the schedule's
+    // member object and returns its state-text (multi-state, 1-based) or
+    // active/inactive-text (binary). An explicit `states` card config wins.
+    if (Array.isArray(this._config.states) && this._config.states.length) {
+      return;
+    }
+    if (Array.isArray(data.state_texts) && data.state_texts.length) {
+      this._states = data.state_texts.map((label, i) => ({
+        label: String(label),
+        value: i + 1,
+        color: PASTEL_FALLBACK[i % PASTEL_FALLBACK.length],
+      }));
+    } else if (data.active_text || data.inactive_text) {
+      this._states = [
+        {
+          label: String(data.active_text || "Active"),
+          value: 1,
+          color: "#BFE3C0",
+        },
+        {
+          label: String(data.inactive_text || "Inactive"),
+          value: 0,
+          color: "#E3EAF2",
+        },
+      ];
+    } else {
+      return;
+    }
+    if (this._activeStateIndex >= this._states.length) {
+      this._activeStateIndex = 0;
+    }
+  }
+
   // ---- painting ------------------------------------------------------------
+
+  _activeValue() {
+    return this._states[this._activeStateIndex].value;
+  }
 
   _paint(day, slot, value) {
     if (this._grid[day][slot] === value) return;
@@ -336,8 +405,7 @@ class BacnetScheduleCard extends HTMLElement {
     let end = slot;
     while (start > 0 && this._grid[day][start - 1] === target) start--;
     while (end < this._slots - 1 && this._grid[day][end + 1] === target) end++;
-    const def = Number(this._config.default_value);
-    for (let s = start; s <= end; s++) this._grid[day][s] = def;
+    for (let s = start; s <= end; s++) this._grid[day][s] = null;
     this._dirty = true;
     this._update();
   }
@@ -374,8 +442,8 @@ class BacnetScheduleCard extends HTMLElement {
     menu.appendChild(_separator());
 
     menu.appendChild(
-      _menuButton("Clear this slot", () => {
-        this._paint(day, slot, Number(this._config.default_value));
+      _menuButton("Clear this slot (no action)", () => {
+        this._paint(day, slot, null);
         this._closeMenu();
       })
     );
@@ -413,11 +481,16 @@ class BacnetScheduleCard extends HTMLElement {
     menu.appendChild(paste);
 
     this.shadowRoot.appendChild(menu);
-    // Position within the card, keeping the menu inside the viewport width.
+    // Position within the card (the :host is the positioning context), keeping
+    // the menu inside the card horizontally and vertically.
     const rect = this.getBoundingClientRect();
     const left = Math.min(x - rect.left, rect.width - 210);
+    const top = Math.min(
+      Math.max(4, y - rect.top),
+      Math.max(4, rect.height - menu.offsetHeight - 4)
+    );
     menu.style.left = `${Math.max(4, left)}px`;
-    menu.style.top = `${y - rect.top}px`;
+    menu.style.top = `${top}px`;
     this._menu = menu;
 
     setTimeout(() => {
@@ -477,7 +550,7 @@ object_id: "schedule,1"</pre>
         </div>
         <div id="status" class="status"></div>
         <div id="palette" class="palette"></div>
-        <div id="board" class="board"></div>
+        <div class="board-wrap"><div id="board" class="board"></div></div>
       </ha-card>
     `;
     this.shadowRoot.getElementById("title").textContent = this._config.title;
@@ -509,7 +582,8 @@ object_id: "schedule,1"</pre>
     });
     const hint = document.createElement("span");
     hint.className = "hint";
-    hint.textContent = "Left-click/drag to paint · Right-click for options";
+    hint.textContent =
+      "Click/tap or drag to paint · Right-click / long-press for options";
     palette.appendChild(hint);
   }
 
@@ -545,19 +619,54 @@ object_id: "schedule,1"</pre>
         cell.dataset.slot = slot;
         this._styleCell(cell, this._grid[day][slot]);
 
-        cell.addEventListener("mousedown", (ev) => {
-          if (ev.button !== 0) return;
-          ev.preventDefault();
-          this._painting = true;
-          this._paint(day, slot, this._states[this._activeStateIndex].value);
-        });
-        cell.addEventListener("mouseenter", () => {
-          if (this._painting) {
-            this._paint(day, slot, this._states[this._activeStateIndex].value);
+        cell.addEventListener("pointerdown", (ev) => {
+          if (ev.pointerType === "mouse") {
+            if (ev.button !== 0) return;
+            ev.preventDefault();
+            this._painting = true;
+            this._paint(day, slot, this._activeValue());
+            return;
           }
+          // Touch/pen: defer the decision - a tap paints on release, a drag
+          // paints a range, a long-press opens the context menu. Releasing
+          // the implicit capture lets pointerenter fire on sibling cells.
+          ev.preventDefault();
+          try {
+            cell.releasePointerCapture(ev.pointerId);
+          } catch (e) {
+            /* not captured - fine */
+          }
+          this._cancelTouch();
+          this._touchStart = { day, slot };
+          this._longPress = setTimeout(() => {
+            this._touchStart = null;
+            this._longPress = null;
+            this._openMenu(ev.clientX, ev.clientY, day, slot);
+          }, 500);
+        });
+        cell.addEventListener("pointerenter", () => {
+          if (this._touchStart) {
+            // The finger moved to another cell: this is a drag, not a tap.
+            const start = this._touchStart;
+            this._cancelTouch();
+            this._painting = true;
+            this._paint(start.day, start.slot, this._activeValue());
+          }
+          if (this._painting) {
+            this._paint(day, slot, this._activeValue());
+          }
+        });
+        cell.addEventListener("pointerup", (ev) => {
+          if (ev.pointerType === "mouse") return;
+          if (this._touchStart) {
+            // Simple tap: paint this single slot.
+            this._paint(day, slot, this._activeValue());
+          }
+          this._cancelTouch();
         });
         cell.addEventListener("contextmenu", (ev) => {
           ev.preventDefault();
+          this._cancelTouch();
           this._openMenu(ev.clientX, ev.clientY, day, slot);
         });
         board.appendChild(cell);
@@ -580,6 +689,11 @@ object_id: "schedule,1"</pre>
     } else {
       status.textContent = "In sync with device";
       status.className = "status ok";
+    }
+    if (!this._loading && !this._error && this._exceptionCount > 0) {
+      status.textContent += ` · ${this._exceptionCount} exception entr${
+        this._exceptionCount > 1 ? "ies" : "y"
+      } on the device may override this grid`;
     }
   }
 
@@ -621,7 +735,11 @@ function _hashCode(str) {
 }
 
 const STYLE = `
-  :host { display: block; }
+  /* position:relative makes the host the containing block of the absolutely
+     positioned context menu; without it the menu anchors to whatever
+     positioned ancestor the dashboard happens to have and appears far from
+     the clicked cell. */
+  :host { display: block; position: relative; }
   ha-card { padding: 16px; }
   .head { display: flex; align-items: center; justify-content: space-between; }
   h2 { margin: 0; font-size: 1.15rem; font-weight: 600; }
@@ -657,20 +775,28 @@ const STYLE = `
   .swatch .chip { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.12); }
   .hint { font-size: 0.72rem; color: var(--secondary-text-color, #888); margin-left: auto; }
 
+  /* The wrapper caps the card height and scrolls; day headers stay pinned. */
+  .board-wrap {
+    max-height: 480px; overflow-y: auto;
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 10px;
+  }
   .board {
-    position: relative;
     display: grid;
     grid-template-columns: 52px repeat(7, 1fr);
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 10px; overflow: hidden;
-    user-select: none;
+    user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
-  .corner { background: var(--secondary-background-color, #f5f5f5); }
+  .corner {
+    background: var(--secondary-background-color, #f5f5f5);
+    position: sticky; top: 0; z-index: 2;
+  }
   .day-head {
     background: var(--secondary-background-color, #f5f5f5);
     text-align: center; font-size: 0.78rem; font-weight: 700;
     padding: 6px 0; color: var(--primary-text-color, #212121);
     border-left: 1px solid var(--divider-color, #e0e0e0);
+    position: sticky; top: 0; z-index: 2;
   }
   .hour {
     font-size: 0.68rem; color: var(--secondary-text-color, #999);
@@ -681,6 +807,9 @@ const STYLE = `
   .cell {
     height: 14px; border-left: 1px solid var(--divider-color, #eee);
     cursor: crosshair;
+    /* Touch on cells paints instead of scrolling; scroll via the hour
+       column (kept at the browser default touch-action). */
+    touch-action: none;
   }
   .cell.hour-line { border-top: 1px solid var(--divider-color, #e0e0e0); }
   .cell.is-empty {

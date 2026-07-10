@@ -96,10 +96,21 @@ A custom Lovelace card renders a BACnet `schedule` object as an interactive
 
 - **Columns** = the 7 days of the week
 - **Rows** = the hours of the day (15 / 30 / 60 min resolution)
-- **Left click / drag** = paint the selected state
-- **Right click** = context menu (set a state, clear slot, **delete segment**,
-  fill the day, copy/paste a day)
-- **Save** writes the grid back through `bacnet.write_schedule`
+- **Left click / drag** (or **tap / drag** on touch screens) = paint the
+  selected state
+- **Right click / long-press** = context menu (set a state, clear slot,
+  **delete segment**, fill the day, copy/paste a day)
+- **Save** writes the grid back through `bacnet.write_schedule`, then reads it
+  back so "In sync" reflects what the device actually stored
+- **Hatched cells** = BACnet *no action*: the device falls back to its
+  `schedule-default` value; they are written back as `Null` entries so a
+  read-modify-write round trip never changes the device's relinquish behavior
+- **Labels come from the device**: a `schedule` object has no state texts of
+  its own, so the integration follows its
+  `list-of-object-property-references` to the first member object and uses its
+  `state-text` (multi-state) or `active`/`inactive-text` (binary) — in the
+  card's palette *and* as the schedule sensor's displayed state. An explicit
+  `states:` card config overrides this.
 
 > **About writing:** a BACnet `weekly-schedule` is a `BACnetARRAY[7] of
 > DailySchedule`, and controllers expect the **whole week** to be written at
@@ -122,8 +133,7 @@ device_address: "192.168.1.50"
 object_id: "schedule,1"
 title: "AHU-1 Occupancy"
 resolution: 30            # minutes per slot: 15 / 30 / 60
-default_value: 0          # value used for "empty" slots
-states:                   # optional, overrides the pastel defaults
+states:                   # optional - omit to use the device's own state texts
   - { label: "Occupied",   value: 1, color: "#BFE3C0" }
   - { label: "Standby",    value: 2, color: "#FCE1B6" }
   - { label: "Unoccupied", value: 0, color: "#E3EAF2" }

@@ -83,6 +83,33 @@ class BACnetScheduleSensor(BACnetEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the schedule's present (active) value."""
-        return self.native_raw_value
+        """Return the schedule's present (active) value.
+
+        When discovery resolved display texts from the schedule's member
+        objects, the raw value is mapped to its label (state-text is 1-based;
+        binary members use active/inactive-text).
+        """
+        value = self.native_raw_value
+        if value is None:
+            return None
+        if self._point.state_text:
+            try:
+                pos = int(value) - 1
+            except (TypeError, ValueError):
+                return value
+            if 0 <= pos < len(self._point.state_text):
+                return self._point.state_text[pos]
+            return value
+        if self._point.active_text or self._point.inactive_text:
+            try:
+                active = bool(int(value))
+            except (TypeError, ValueError):
+                return value
+            text = (
+                self._point.active_text
+                if active
+                else self._point.inactive_text
+            )
+            return text if text is not None else value
+        return value
 

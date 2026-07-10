@@ -558,6 +558,16 @@ class BACnetHub:
                             address, object_id, "inactive-text"
                         )
                     )
+            elif obj_type == "schedule":
+                # Schedules have no texts of their own; borrow them from the
+                # first member object they command, so the schedule entity
+                # displays "Comfort" instead of a bare number.
+                member = await self._async_schedule_member_texts(
+                    address, object_id
+                )
+                state_text = member["state_texts"]
+                active_text = member["active_text"]
+                inactive_text = member["inactive_text"]
             objects.append(
                 DiscoveredObject(
                     object_type=obj_type,
@@ -716,13 +726,69 @@ class BACnetHub:
         if value_type is None:
             value_type = _infer_value_type_from_weekly(weekly)
 
+        # Human-readable labels for the scheduled values (a Schedule object has
+        # none of its own; they live on the member objects it commands).
+        member_texts = await self._async_schedule_member_texts(address, object_id)
+
         return {
             "weekly_schedule": _serialize_weekly_schedule(weekly),
             "exception_schedule": _serialize_exception_schedule(exception),
             "present_value": _coerce_log_datum(present_value),
             "schedule_default": _coerce_log_datum(schedule_default),
             "value_type": value_type,
+            "state_texts": member_texts["state_texts"],
+            "active_text": member_texts["active_text"],
+            "inactive_text": member_texts["inactive_text"],
         }
+
+    async def _async_schedule_member_texts(
+        self, address: str, object_id: str
+    ) -> dict[str, Any]:
+        """Resolve display texts for a Schedule's values from its members.
+
+        A Schedule carries no state-text of its own: the human-readable labels
+        live on the objects it commands. Follow the schedule's
+        ``list-of-object-property-references`` to the first *local* member of a
+        text-bearing type and read its ``state-text`` (multi-state) or
+        ``active-text``/``inactive-text`` (binary).
+        """
+        texts: dict[str, Any] = {
+            "state_texts": None,
+            "active_text": None,
+            "inactive_text": None,
+        }
+        refs = await self._async_read_optional(
+            address, object_id, "list-of-object-property-references"
+        )
+        for ref in refs or []:
+            member_id = _schedule_member_target(ref)
+            if member_id is None:
+                continue
+            kind = member_id.split(",", 1)[0].casefold().replace("-", "")
+            if kind.startswith("multistate"):
+                raw = await self._async_read_optional(
+                    address, member_id, "state-text"
+                )
+                state_texts = [str(item) for item in raw or []] or None
+                if state_texts:
+                    texts["state_texts"] = state_texts
+                    return texts
+            elif kind.startswith("binary"):
+                active = await self._async_read_optional(
+                    address, member_id, "active-text"
+                )
+                inactive = await self._async_read_optional(
+                    address, member_id, "inactive-text"
+                )
+                if active is not None or inactive is not None:
+                    texts["active_text"] = (
+                        None if active is None else str(active)
+                    )
+                    texts["inactive_text"] = (
+                        None if inactive is None else str(inactive)
+                    )
+                    return texts
+        return texts
 
     async def async_write_schedule(
         self,
@@ -875,6 +941,24 @@ def _object_ids_to_str(ids: Any) -> list[str]:
             if text:
                 result.append(text)
     return result
+
+
+def _schedule_member_target(ref: Any) -> str | None:
+    """Return the local ``type,instance`` a schedule member reference targets.
+
+    Schedule members are ``DeviceObjectPropertyReference`` items. References
+    that point at another device (``deviceIdentifier`` set) or that cannot be
+    parsed yield ``None``.
+    """
+    if getattr(ref, "deviceIdentifier", None) is not None:
+        return None
+    member = getattr(ref, "objectIdentifier", None)
+    if member is None:
+        return None
+    try:
+        return f"{member[0]},{int(member[1])}"
+    except (TypeError, IndexError, ValueError):
+        return None
 
 
 def _serialize_weekly_schedule(weekly: Any) -> list[list[dict[str, Any]]] | None:
