@@ -67,12 +67,13 @@
       },
       "select_points": {
         "title": "Select points",
-        "description": "Choose the objects to monitor on {device}. Already-configured points are pre-selected and keep their settings; use the search box to filter.",
+        "description": "Choose the objects to monitor on {device}. Points are grouped by installation - expand a section, tick its points, and validate everything at once. Already-configured points are pre-selected (their sections start expanded) and keep their settings; use the search box inside a dropdown to filter.",
         "data": {
           "device_name": "Device name",
           "points": "Points",
           "use_cov": "Use Change-Of-Value subscriptions",
-          "write_priority": "Default write priority"
+          "write_priority": "Default write priority",
+          "other_points": "Points outside any installation"
         }
       },
       "settings": {
@@ -98,12 +99,33 @@
     }
   },
   "services": {
-    "read_property": { "name": "Read property", "description": "Read a property from a BACnet object." },
-    "write_property": { "name": "Write property", "description": "Write a property to a BACnet object." },
-    "who_is": { "name": "Who-Is", "description": "Discover BACnet devices on the network." },
-    "read_schedule": { "name": "Read schedule", "description": "Read a Schedule object's weekly and exception schedules." },
-    "write_schedule": { "name": "Write schedule", "description": "Write a weekly schedule to a Schedule object." },
-    "read_trend_log": { "name": "Read trend log", "description": "Read recent records from a Trend Log object." },
-    "acknowledge_alarm": { "name": "Acknowledge alarm", "description": "Acknowledge an alarm on a BACnet object." }
+    "read_property": {
+      "name": "Read property",
+      "description": "Read a property from a BACnet object."
+    },
+    "write_property": {
+      "name": "Write property",
+      "description": "Write a property to a BACnet object."
+    },
+    "who_is": {
+      "name": "Who-Is",
+      "description": "Discover BACnet devices on the network."
+    },
+    "read_schedule": {
+      "name": "Read schedule",
+      "description": "Read a Schedule object's weekly and exception schedules."
+    },
+    "write_schedule": {
+      "name": "Write schedule",
+      "description": "Write a weekly schedule to a Schedule object."
+    },
+    "read_trend_log": {
+      "name": "Read trend log",
+      "description": "Read recent records from a Trend Log object."
+    },
+    "acknowledge_alarm": {
+      "name": "Acknowledge alarm",
+      "description": "Acknowledge an alarm on a BACnet object."
+    }
   }
 }

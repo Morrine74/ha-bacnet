@@ -98,3 +98,79 @@ def test_slugify_equipment_is_stable_and_deterministic():
 def test_slugify_equipment_none_without_equipment():
     split = build_split(["Gymnase", "T"], None)
     assert slugify_equipment(4007, split) is None
+
+
+class _Obj:
+    """Stand-in for a DiscoveredObject (picker grouping tests)."""
+
+    def __init__(self, object_id, tree_path=None, equipment_index=None,
+                 description=None, name=None):
+        self.object_id = object_id
+        self.tree_path = tree_path
+        self.equipment_index = equipment_index
+        self.description = description
+        self.name = name
+
+
+_HEAT = ["Gymnase", "LT", "Production de chaleur", "Chaudière", "Température"]
+_AHU = ["Gymnase", "Salle", "CTA", "Batterie chaude", "Vanne"]
+
+
+def test_short_label_is_installation_relative():
+    obj = _Obj("analog-input,1", tree_path=_HEAT, equipment_index=2)
+    assert siemens.short_label(obj) == "Chaudière · Température [analog-input,1]"
+    # No path: falls back to description, then name.
+    assert siemens.short_label(
+        _Obj("binary-value,2", description="Pompe")
+    ) == "Pompe [binary-value,2]"
+    assert siemens.short_label(_Obj("binary-value,3")) == (
+        "binary-value,3 [binary-value,3]"
+    )
+
+
+def test_group_by_installation_splits_and_sorts():
+    heat_a = _Obj("analog-input,1", tree_path=_HEAT, equipment_index=2)
+    heat_b = _Obj(
+        "analog-input,2",
+        tree_path=["Gymnase", "LT", "Production de chaleur", "Alarme"],
+        equipment_index=2,
+    )
+    ahu = _Obj("analog-input,3", tree_path=_AHU, equipment_index=2)
+    loose = _Obj("binary-value,9", description="Point libre")
+
+    groups, ungrouped = siemens.group_by_installation([heat_a, ahu, loose, heat_b])
+    assert list(groups) == ["Production de chaleur", "CTA"]
+    # Points inside a group are sorted by their short label.
+    assert [o.object_id for o in groups["Production de chaleur"]] == [
+        "analog-input,2",
+        "analog-input,1",
+    ]
+    assert [o.object_id for o in groups["CTA"]] == ["analog-input,3"]
+    assert [o.object_id for o in ungrouped] == ["binary-value,9"]
+
+
+def test_group_by_installation_flat_when_single_installation():
+    # One installation only: grouping buys nothing, keep the flat picker.
+    heat = _Obj("analog-input,1", tree_path=_HEAT, equipment_index=2)
+    loose = _Obj("binary-value,9")
+    groups, ungrouped = siemens.group_by_installation([heat, loose])
+    assert groups is None
+    assert ungrouped == [heat, loose]
+    # Non-Siemens device (no tree paths at all) likewise stays flat.
+    groups, ungrouped = siemens.group_by_installation([loose])
+    assert groups is None
+
+
+def test_group_by_installation_disambiguates_same_name_across_areas():
+    a = _Obj(
+        "analog-input,1",
+        tree_path=["Bât. A", "CTA", "Vanne"],
+        equipment_index=1,
+    )
+    b = _Obj(
+        "analog-input,2",
+        tree_path=["Bât. B", "CTA", "Vanne"],
+        equipment_index=1,
+    )
+    groups, _ungrouped = siemens.group_by_installation([a, b])
+    assert list(groups) == ["CTA — Bât. A", "CTA — Bât. B"]

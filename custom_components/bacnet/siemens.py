@@ -111,6 +111,59 @@ def build_split(
     return PathSplit(area=area, equipment=equipment, name=name, segments=segments)
 
 
+def short_label(obj) -> str:
+    """Build a compact picker label for a point listed under its installation.
+
+    The installation (and everything above it) is already the group title, so
+    only the functional breadcrumb and leaf remain, e.g.
+    ``Chaudière · Température au retour [analog-input,1006]``.
+    """
+    split = build_split(
+        getattr(obj, "tree_path", None), getattr(obj, "equipment_index", None)
+    )
+    primary = (
+        split.name
+        or getattr(obj, "description", None)
+        or getattr(obj, "name", None)
+        or obj.object_id
+    )
+    return f"{primary} [{obj.object_id}]"
+
+
+def group_by_installation(objects: list) -> tuple[dict[str, list] | None, list]:
+    """Group discovered points by their installation (``system`` node).
+
+    Returns ``(groups, ungrouped)`` where ``groups`` maps a unique display name
+    (the installation, disambiguated by its area when two areas contain a
+    same-named installation) to its points, sorted by label, and ``ungrouped``
+    collects points without an installation level. With fewer than two
+    installations grouping buys nothing, so ``(None, objects)`` is returned and
+    the caller keeps its flat picker.
+    """
+    by_install: dict[tuple[str, str], list] = {}
+    ungrouped: list = []
+    for obj in objects:
+        split = build_split(
+            getattr(obj, "tree_path", None), getattr(obj, "equipment_index", None)
+        )
+        if split.equipment:
+            by_install.setdefault((split.area or "", split.equipment), []).append(obj)
+        else:
+            ungrouped.append(obj)
+    if len(by_install) < 2:
+        return None, objects
+
+    names = [equipment for (_area, equipment) in by_install]
+    groups: dict[str, list] = {}
+    for (area, equipment), objs in sorted(by_install.items()):
+        key = equipment
+        if names.count(equipment) > 1 and area:
+            key = f"{equipment} — {area}"
+        objs.sort(key=lambda o: short_label(o).casefold())
+        groups[key] = objs
+    return groups, ungrouped
+
+
 def _slug(text: str) -> str:
     """Reduce a string to a stable, identifier-safe token."""
     norm = _normalize(text)

@@ -56,6 +56,10 @@ The integration is configured entirely through the UI (Config Flow):
    BBMD address for foreign-device registration across subnets.
 2. **Options → Discover and add a device** — runs a Who-Is, lists answering
    devices, then reads their object-list so you can pick which points to expose.
+   On Siemens controllers the picker groups points into one collapsible section
+   per installation (Production de chaleur, CTA, …) with short,
+   installation-relative names; tick points across as many sections as you like
+   and validate everything in one go.
 3. For each point you can enable **COV** (push updates) and set a default
    **write priority** (1–16).
 

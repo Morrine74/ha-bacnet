@@ -40,6 +40,7 @@ from .const import (
 )
 from .hub import BACnetHub, BACnetHubError, _ensure_cidr
 from .models import DeviceConfig, PointConfig, devices_from_options
+from .siemens import group_by_installation, short_label
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +58,30 @@ def _point_label(obj: Any) -> str:
         return f"{obj.description} ({obj.name}) [{obj.object_id}]"
     primary = obj.description or obj.name or obj.object_id
     return f"{primary} [{obj.object_id}]"
+
+
+def _multi_select(options: dict[str, str]) -> Any:
+    """Build a searchable multi-select dropdown (checkbox fallback)."""
+    try:
+        from homeassistant.helpers.selector import (
+            SelectOptionDict,
+            SelectSelector,
+            SelectSelectorConfig,
+            SelectSelectorMode,
+        )
+    except ImportError:
+        return cv.multi_select(options)
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=[
+                SelectOptionDict(value=oid, label=label)
+                for oid, label in options.items()
+            ],
+            multiple=True,
+            mode=SelectSelectorMode.DROPDOWN,
+            custom_value=False,
+        )
+    )
 
 
 def _user_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -152,6 +177,8 @@ class BACnetOptionsFlow(OptionsFlow):
         self._selected_device: DeviceConfig | None = None
         self._selected_vendor_id: int | None = None
         self._discovered_objects: list[Any] = []
+        # Installation grouping of the point picker (None = flat picker).
+        self._point_groups: dict[str, list[Any]] | None = None
 
     def _hub(self) -> BACnetHub | None:
         data = getattr(self._entry, "runtime_data", None)
@@ -429,7 +456,20 @@ class BACnetOptionsFlow(OptionsFlow):
         )
 
         if user_input is not None:
-            chosen = user_input.get("points", [])
+            # Selected points come from the flat "points" field (non-grouped
+            # picker), the "other_points" field (grouped picker's points
+            # without an installation) and/or one section per installation. A
+            # section arrives nested ({key: {"points": [...]}}); the
+            # sectionless fallback delivers the list directly under the
+            # installation key.
+            chosen = list(user_input.get("points") or [])
+            chosen.extend(user_input.get("other_points") or [])
+            for key in self._point_groups or {}:
+                value = user_input.get(key)
+                if isinstance(value, dict):
+                    chosen.extend(value.get("points") or [])
+                elif isinstance(value, list):
+                    chosen.extend(value)
             use_cov = user_input.get(CONF_USE_COV, False)
             priority = user_input.get(CONF_WRITE_PRIORITY, DEFAULT_WRITE_PRIORITY)
             cov_changed = use_cov != prefill_cov
@@ -516,65 +556,84 @@ class BACnetOptionsFlow(OptionsFlow):
         # notification-class, proprietary types, ...) are accessed through
         # services instead. Schedules are included so they can be exposed and
         # edited with the schedule card.
-        # Sort by tree path so points of the same installation are adjacent and
-        # readable (falls back to type/instance for non-Siemens devices).
         selectable = [
             o for o in self._discovered_objects if o.object_type in SELECTABLE_TYPES
         ]
-        selectable.sort(
-            key=lambda o: o.tree_path or [o.object_type, f"{o.instance:08d}"]
-        )
-        options = {o.object_id: _point_label(o) for o in selectable}
-        if not options:
+        if not selectable:
             return self.async_abort(reason="no_objects_found")
 
-        # Pre-tick the points already configured for this device so the picker
-        # edits the existing selection instead of starting from scratch.
-        default_points = [oid for oid in options if oid in existing_by_id]
         default_name = existing.name if existing else device.name
+        selected = set(existing_by_id)
 
-        # A searchable multi-select dropdown: with hundreds of points on a
-        # controller, the old flat checkbox list was unusable.
-        points_selector: Any
-        try:
-            from homeassistant.helpers.selector import (
-                SelectOptionDict,
-                SelectSelector,
-                SelectSelectorConfig,
-                SelectSelectorMode,
+        # Siemens devices with several installations get one collapsible
+        # section per installation, each holding a searchable multi-select of
+        # its points with short (installation-relative) labels. Everything is
+        # ticked across sections and saved in a single submit. Other devices
+        # keep the flat searchable picker with full labels.
+        self._point_groups, ungrouped = group_by_installation(selectable)
+
+        schema: dict[Any, Any] = {
+            vol.Optional(CONF_DEVICE_NAME, default=default_name): str
+        }
+
+        section: Any = None
+        if self._point_groups is not None:
+            try:
+                from homeassistant.data_entry_flow import section
+            except ImportError:
+                section = None
+
+        if self._point_groups is None:
+            # Flat picker, sorted by tree path so related points stay adjacent.
+            ungrouped = sorted(
+                ungrouped,
+                key=lambda o: o.tree_path or [o.object_type, f"{o.instance:08d}"],
             )
-
-            points_selector = SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        SelectOptionDict(value=oid, label=label)
-                        for oid, label in options.items()
-                    ],
-                    multiple=True,
-                    mode=SelectSelectorMode.DROPDOWN,
-                    custom_value=False,
+            options = {o.object_id: _point_label(o) for o in ungrouped}
+            schema[
+                vol.Required(
+                    "points",
+                    default=[oid for oid in options if oid in selected],
                 )
+            ] = _multi_select(options)
+        else:
+            if ungrouped:
+                ungrouped = sorted(
+                    ungrouped, key=lambda o: short_label(o).casefold()
+                )
+                options = {o.object_id: short_label(o) for o in ungrouped}
+                schema[
+                    vol.Optional(
+                        "other_points",
+                        default=[oid for oid in options if oid in selected],
+                    )
+                ] = _multi_select(options)
+            for key, objs in self._point_groups.items():
+                options = {o.object_id: short_label(o) for o in objs}
+                defaults = [oid for oid in options if oid in selected]
+                selector = _multi_select(options)
+                if section is not None:
+                    # Sections with already-configured points start expanded.
+                    schema[vol.Optional(key)] = section(
+                        vol.Schema(
+                            {vol.Optional("points", default=defaults): selector}
+                        ),
+                        {"collapsed": not defaults},
+                    )
+                else:
+                    schema[vol.Optional(key, default=defaults)] = selector
+
+        schema[vol.Optional(CONF_USE_COV, default=prefill_cov)] = bool
+        schema[vol.Optional(CONF_WRITE_PRIORITY, default=prefill_priority)] = (
+            vol.All(
+                int,
+                vol.Range(min=MIN_WRITE_PRIORITY, max=MAX_WRITE_PRIORITY),
             )
-        except ImportError:
-            points_selector = cv.multi_select(options)
+        )
 
         return self.async_show_form(
             step_id="select_points",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_DEVICE_NAME, default=default_name): str,
-                    vol.Required(
-                        "points", default=default_points
-                    ): points_selector,
-                    vol.Optional(CONF_USE_COV, default=prefill_cov): bool,
-                    vol.Optional(
-                        CONF_WRITE_PRIORITY, default=prefill_priority
-                    ): vol.All(
-                        int,
-                        vol.Range(min=MIN_WRITE_PRIORITY, max=MAX_WRITE_PRIORITY),
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema),
             description_placeholders={
                 "device": f"{device.name} ({device.address})"
             },

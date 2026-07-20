@@ -34,20 +34,28 @@
       },
       "discover": {
         "title": "Périphériques découverts",
-        "data": { "device": "Périphérique" }
+        "data": {
+          "device": "Périphérique"
+        }
       },
       "manage_device": {
         "title": "Gérer un périphérique",
-        "data": { "device": "Périphérique" }
+        "data": {
+          "device": "Périphérique"
+        }
       },
       "rename_device": {
         "title": "Renommer un périphérique",
-        "data": { "device": "Périphérique" }
+        "data": {
+          "device": "Périphérique"
+        }
       },
       "rename_device_name": {
         "title": "Renommer un périphérique",
         "description": "Nouveau nom pour {device}.",
-        "data": { "device_name": "Nom du périphérique" }
+        "data": {
+          "device_name": "Nom du périphérique"
+        }
       },
       "add_by_ip": {
         "title": "Ajouter un périphérique par IP",
@@ -59,21 +67,26 @@
       },
       "select_points": {
         "title": "Sélection des points",
-        "description": "Choisissez les objets à surveiller sur {device}. Les points déjà configurés sont pré-sélectionnés et conservent leurs réglages ; utilisez la recherche pour filtrer.",
+        "description": "Choisissez les objets à surveiller sur {device}. Les points sont regroupés par installation : dépliez une section, cochez ses points, puis validez le tout en une fois. Les points déjà configurés sont pré-sélectionnés (leurs sections sont dépliées) et conservent leurs réglages ; utilisez la recherche dans un menu pour filtrer.",
         "data": {
           "device_name": "Nom du périphérique",
           "points": "Points",
           "use_cov": "Utiliser les abonnements COV (Change-Of-Value)",
-          "write_priority": "Priorité d'écriture par défaut"
+          "write_priority": "Priorité d'écriture par défaut",
+          "other_points": "Points hors installation"
         }
       },
       "settings": {
         "title": "Paramètres d'interrogation",
-        "data": { "scan_interval": "Intervalle d'interrogation (secondes)" }
+        "data": {
+          "scan_interval": "Intervalle d'interrogation (secondes)"
+        }
       },
       "remove_device": {
         "title": "Supprimer un périphérique",
-        "data": { "device": "Périphérique" }
+        "data": {
+          "device": "Périphérique"
+        }
       }
     },
     "abort": {

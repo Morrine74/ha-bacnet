@@ -34,20 +34,28 @@
       },
       "discover": {
         "title": "Discovered devices",
-        "data": { "device": "Device" }
+        "data": {
+          "device": "Device"
+        }
       },
       "manage_device": {
         "title": "Manage a device",
-        "data": { "device": "Device" }
+        "data": {
+          "device": "Device"
+        }
       },
       "rename_device": {
         "title": "Rename a device",
-        "data": { "device": "Device" }
+        "data": {
+          "device": "Device"
+        }
       },
       "rename_device_name": {
         "title": "Rename a device",
         "description": "New name for {device}.",
-        "data": { "device_name": "Device name" }
+        "data": {
+          "device_name": "Device name"
+        }
       },
       "add_by_ip": {
         "title": "Add a device by IP",
@@ -59,21 +67,26 @@
       },
       "select_points": {
         "title": "Select points",
-        "description": "Choose the objects to monitor on {device}. Already-configured points are pre-selected and keep their settings; use the search box to filter.",
+        "description": "Choose the objects to monitor on {device}. Points are grouped by installation - expand a section, tick its points, and validate everything at once. Already-configured points are pre-selected (their sections start expanded) and keep their settings; use the search box inside a dropdown to filter.",
         "data": {
           "device_name": "Device name",
           "points": "Points",
           "use_cov": "Use Change-Of-Value subscriptions",
-          "write_priority": "Default write priority"
+          "write_priority": "Default write priority",
+          "other_points": "Points outside any installation"
         }
       },
       "settings": {
         "title": "Polling settings",
-        "data": { "scan_interval": "Scan interval (seconds)" }
+        "data": {
+          "scan_interval": "Scan interval (seconds)"
+        }
       },
       "remove_device": {
         "title": "Remove a device",
-        "data": { "device": "Device" }
+        "data": {
+          "device": "Device"
+        }
       }
     },
     "abort": {
