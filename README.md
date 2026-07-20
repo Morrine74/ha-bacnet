@@ -21,6 +21,7 @@ inside Home Assistant.
 | Device discovery (Who-Is / I-Am) | ✅ | Config flow + `bacnet.who_is` service |
 | Object discovery (object-list) | ✅ | Config flow point picker |
 | Read points (ReadProperty) | ✅ | Sensors / polling coordinator |
+| Batched polling (ReadPropertyMultiple) | ✅ | Automatic, with per-point fallback |
 | Write points (WriteProperty + priority array) | ✅ | `number`, `switch`, `select` entities |
 | Change-Of-Value subscriptions (COV) | ✅ | Push updates (`local_push`) |
 | BACnet/IP | ✅ | Native |
@@ -67,6 +68,18 @@ Points map to Home Assistant entities as follows:
 | analog-output, analog-value | `number` |
 | binary-output, binary-value | `switch` |
 | multi-state-output, multi-state-value | `select` |
+
+### Polling & availability
+
+Each poll cycle batches all the points of a device into a few
+**ReadPropertyMultiple** requests (instead of one ReadProperty round-trip per
+point). Devices that reject the RPM service automatically fall back to
+per-point reads. COV points are polled too: pushes stay authoritative between
+polls, while the poll recovers from missed notifications.
+
+A point that fails to read keeps its last known value for a couple of cycles
+(riding out one-off timeouts), then its entity is marked **unavailable** until
+the device answers again — stale values are never shown indefinitely.
 
 ## Services
 

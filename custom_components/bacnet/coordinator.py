@@ -9,13 +9,24 @@ from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN
-from .hub import BACnetHub, BACnetHubError
+from .const import (
+    ANALOG_TYPES,
+    BINARY_TYPES,
+    DOMAIN,
+    MAX_POLL_FAILURES,
+    MULTI_STATE_TYPES,
+)
+from .hub import BACnetHub, BACnetHubError, BACnetServiceUnsupported
 from .models import DeviceConfig, PointConfig
 
 _LOGGER = logging.getLogger(__name__)
+
+# Object types safe to batch into a ReadPropertyMultiple request. Other types
+# (e.g. schedule, whose present-value needs bacpypes3's AnyAtomic unwrapping on
+# the single-read path) are polled individually.
+_BATCHABLE_TYPES = ANALOG_TYPES | BINARY_TYPES | MULTI_STATE_TYPES
 
 
 def point_key(address: str, object_id: str) -> str:
@@ -45,7 +56,10 @@ class BACnetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hub = hub
         self.devices = devices
         self._cov_unsubscribers: list[Callable[[], None]] = []
-        self._cov_values: dict[str, Any] = {}
+        # Devices that rejected ReadPropertyMultiple; polled point by point.
+        self._rpm_unsupported: set[str] = set()
+        # Consecutive poll failures per point key; drives availability.
+        self._fail_counts: dict[str, int] = {}
 
     def iter_points(self):
         """Yield (device, point) pairs for every configured point."""
@@ -67,10 +81,10 @@ class BACnetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         @callback
         def _handle_cov(payload: dict[str, Any]) -> None:
             if payload.get("property") in ("present-value", "presentValue"):
-                value = _normalize_value(payload["value"])
-                self._cov_values[key] = value
+                # A push proves the device is alive.
+                self._fail_counts.pop(key, None)
                 data = dict(self.data or {})
-                data[key] = value
+                data[key] = _normalize_value(payload["value"])
                 self.async_set_updated_data(data)
 
         try:
@@ -94,35 +108,123 @@ class BACnetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await super().async_shutdown()
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Read the present-value of every polled point."""
+        """Read the present-value of every configured point.
+
+        Points on the same device are batched into ReadPropertyMultiple
+        requests (a handful of round-trips instead of one per point); devices
+        that reject the service fall back to per-point ReadProperty reads.
+        COV points are polled too: pushes stay authoritative between polls,
+        the poll recovers from missed notifications and detects dead devices.
+        """
         data: dict[str, Any] = dict(self.data or {})
-
-        async def _read(device: DeviceConfig, point: PointConfig) -> None:
-            key = point_key(device.address, point.object_id)
-            if point.use_cov and key in self._cov_values:
-                # COV-driven points keep their pushed value between polls but we
-                # still refresh occasionally to recover from missed messages.
-                data[key] = self._cov_values[key]
-                return
-            try:
-                value = await self.hub.async_read_present_value(
-                    device.address, point.object_id
-                )
-                data[key] = _normalize_value(value)
-            except BACnetHubError as err:
-                _LOGGER.debug("Read failed for %s: %s", point.object_id, err)
-                data.setdefault(key, None)
-
-        tasks = [
-            _read(device, point) for device, point in self.iter_points()
-        ]
-        if not tasks:
-            return data
-        try:
-            await asyncio.gather(*tasks)
-        except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"BACnet polling failed: {err}") from err
+        await asyncio.gather(
+            *(self._async_poll_device(device, data) for device in self.devices)
+        )
         return data
+
+    async def _async_poll_device(
+        self, device: DeviceConfig, data: dict[str, Any]
+    ) -> None:
+        """Refresh all points of one device, preferring one batched read."""
+        batch: list[PointConfig] = []
+        singles: list[PointConfig] = []
+        for point in device.points:
+            if (
+                device.address not in self._rpm_unsupported
+                and point.object_type in _BATCHABLE_TYPES
+            ):
+                batch.append(point)
+            else:
+                singles.append(point)
+        if len(batch) < 2:
+            # Batching a single point buys nothing.
+            singles.extend(batch)
+            batch = []
+
+        if batch:
+            try:
+                values = await self.hub.async_read_present_values(
+                    device.address, [point.object_id for point in batch]
+                )
+            except BACnetServiceUnsupported as err:
+                _LOGGER.debug(
+                    "%s does not support ReadPropertyMultiple (%s); "
+                    "falling back to per-point reads",
+                    device.address,
+                    err,
+                )
+                self._rpm_unsupported.add(device.address)
+                singles.extend(batch)
+            except BACnetHubError as err:
+                # Transient failure - keep trying RPM on the next poll.
+                _LOGGER.debug(
+                    "Batched read failed for %s: %s", device.address, err
+                )
+                for point in batch:
+                    self._record_failure(device, point, data)
+            else:
+                for point in batch:
+                    if point.object_id in values:
+                        self._record_success(
+                            device, point, values[point.object_id], data
+                        )
+                    else:
+                        self._record_failure(device, point, data)
+
+        if singles:
+            await asyncio.gather(
+                *(self._async_poll_point(device, point, data) for point in singles)
+            )
+
+    async def _async_poll_point(
+        self, device: DeviceConfig, point: PointConfig, data: dict[str, Any]
+    ) -> None:
+        """Refresh a single point with an individual ReadProperty."""
+        try:
+            value = await self.hub.async_read_present_value(
+                device.address, point.object_id
+            )
+        except BACnetHubError as err:
+            _LOGGER.debug("Read failed for %s: %s", point.object_id, err)
+            self._record_failure(device, point, data)
+        else:
+            self._record_success(device, point, value, data)
+
+    def _record_success(
+        self,
+        device: DeviceConfig,
+        point: PointConfig,
+        value: Any,
+        data: dict[str, Any],
+    ) -> None:
+        key = point_key(device.address, point.object_id)
+        self._fail_counts.pop(key, None)
+        data[key] = _normalize_value(value)
+
+    def _record_failure(
+        self, device: DeviceConfig, point: PointConfig, data: dict[str, Any]
+    ) -> None:
+        """Count a failed read; after enough misses the point goes unavailable.
+
+        The last known value is kept for the first few failures so a one-off
+        timeout does not flap the entity; a ``None`` value marks the entity
+        unavailable (see ``BACnetEntity.available``).
+        """
+        key = point_key(device.address, point.object_id)
+        count = self._fail_counts.get(key, 0) + 1
+        self._fail_counts[key] = count
+        if count < MAX_POLL_FAILURES:
+            data.setdefault(key, None)
+            return
+        if data.get(key) is not None:
+            _LOGGER.warning(
+                "%s@%s unreachable for %d consecutive polls; "
+                "marking its entity unavailable",
+                point.object_id,
+                device.address,
+                count,
+            )
+        data[key] = None
 
     async def async_write_point(
         self, device: DeviceConfig, point: PointConfig, value: Any
@@ -136,6 +238,8 @@ class BACnetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             priority=point.write_priority,
         )
         key = point_key(device.address, point.object_id)
+        # A successful write proves the device is alive.
+        self._fail_counts.pop(key, None)
         data = dict(self.data or {})
         data[key] = value
         self.async_set_updated_data(data)

@@ -19,6 +19,7 @@ from .const import (
     DEFAULT_REQUEST_TIMEOUT,
     PROP_NODE_TYPE,
     PROP_SIEMENS_TREE_PATH,
+    RPM_CHUNK_SIZE,
     SIEMENS_VENDOR_ID,
     STRUCTURED_VIEW,
 )
@@ -82,6 +83,14 @@ class CovContext:
 
 class BACnetHubError(Exception):
     """Raised when a BACnet operation fails."""
+
+
+class BACnetServiceUnsupported(BACnetHubError):
+    """Raised when a device rejects a BACnet service outright.
+
+    Distinct from a transient failure (timeout, offline device) so callers can
+    permanently fall back to another strategy instead of retrying forever.
+    """
 
 
 class BACnetHub:
@@ -315,6 +324,95 @@ class BACnetHub:
     ) -> Any:
         """Convenience wrapper to read the present-value property."""
         return await self.async_read_property(address, object_id, "present-value")
+
+    async def async_read_present_values(
+        self,
+        address: str,
+        object_ids: list[str],
+        *,
+        chunk_size: int = RPM_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        """Read many present-values from one device via ReadPropertyMultiple.
+
+        The result maps each requested object id to its value; objects whose
+        read failed individually (unknown object, ...) are simply absent.
+        Raises ``BACnetServiceUnsupported`` when the device rejects the RPM
+        service itself so the caller can fall back to per-point ReadProperty
+        polling. A timed-out chunk aborts the remaining chunks and returns what
+        was read so far: the device is most likely offline, and per-point
+        retries would only multiply the timeouts.
+        """
+        from bacpypes3.pdu import Address
+
+        app = self._require_app()
+        dest = Address(address)
+
+        # Devices may render the object type differently than we asked for
+        # (e.g. "analogInput" vs "analog-input"), so responses are matched
+        # against the request through a normalised (type, instance) key.
+        requested: dict[tuple[str, int], str] = {}
+        for object_id in object_ids:
+            obj_type, instance = self._parse_object_id(object_id)
+            requested[(_canonical_type(obj_type), instance)] = object_id
+
+        values: dict[str, Any] = {}
+        for start in range(0, len(object_ids), chunk_size):
+            chunk = object_ids[start : start + chunk_size]
+            parameters: list[Any] = []
+            for object_id in chunk:
+                obj_type, instance = self._parse_object_id(object_id)
+                parameters.extend((f"{obj_type},{instance}", ["present-value"]))
+            try:
+                response = await asyncio.wait_for(
+                    app.read_property_multiple(dest, parameters),
+                    timeout=DEFAULT_REQUEST_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.debug(
+                    "ReadPropertyMultiple to %s timed out; "
+                    "skipping remaining chunks",
+                    address,
+                )
+                break
+            except _BACnetProtocolError as err:
+                raise BACnetServiceUnsupported(
+                    f"ReadPropertyMultiple rejected by {address}: {err}"
+                ) from err
+            except Exception as err:  # noqa: BLE001
+                raise BACnetHubError(
+                    f"ReadPropertyMultiple to {address} failed: {err}"
+                ) from err
+
+            # bacpypes3 returns (not raises) a device-level error/reject/abort,
+            # and None for an undecodable response.
+            if isinstance(response, _BACnetProtocolError):
+                raise BACnetServiceUnsupported(
+                    f"ReadPropertyMultiple rejected by {address}: {response}"
+                )
+            if response is None:
+                raise BACnetHubError(
+                    f"ReadPropertyMultiple to {address}: no decodable response"
+                )
+
+            for item in response:
+                try:
+                    objid, _prop, _index, value = item
+                    lookup = (_canonical_type(str(objid[0])), int(objid[1]))
+                except (TypeError, IndexError, ValueError):
+                    _LOGGER.debug("Skipping malformed RPM result %r", item)
+                    continue
+                object_id = requested.get(lookup)
+                if object_id is None:
+                    continue
+                # Per-object failures come back inline as ErrorType entries;
+                # None means bacpypes3 could not type the property.
+                if value is None or hasattr(value, "errorClass"):
+                    _LOGGER.debug(
+                        "RPM read of %s@%s failed: %s", object_id, address, value
+                    )
+                    continue
+                values[object_id] = value
+        return values
 
     async def async_read_tree_path(
         self, address: str, object_id: str
@@ -918,6 +1016,15 @@ def _ensure_cidr(local_ip: str) -> str:
         return ip
     host, sep, port = ip.partition(":")
     return f"{host}/24{sep}{port}"
+
+
+def _canonical_type(token: str) -> str:
+    """Normalise an object-type token for request/response matching.
+
+    ``analog-input``, ``analogInput`` and ``analog_input`` all collapse to
+    ``analoginput``.
+    """
+    return re.sub(r"[^a-z0-9]", "", token.casefold())
 
 
 def _node_type_token(value: Any) -> str:

@@ -45,6 +45,14 @@ DEFAULT_DISCOVERY_TIMEOUT: Final = 5
 # lost response can never hang the integration forever.
 DEFAULT_REQUEST_TIMEOUT: Final = 10
 
+# Batched polling: number of objects packed into one ReadPropertyMultiple
+# request. Conservative so a present-value response fits the minimum common
+# 480-byte APDU without needing segmentation.
+RPM_CHUNK_SIZE: Final = 12
+# Consecutive poll failures before a point's entity is marked unavailable;
+# until then the last known value is kept to ride out a one-off timeout.
+MAX_POLL_FAILURES: Final = 3
+
 MIN_SCAN_INTERVAL: Final = 5
 MIN_WRITE_PRIORITY: Final = 1
 MAX_WRITE_PRIORITY: Final = 16
