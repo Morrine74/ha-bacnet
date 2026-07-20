@@ -149,16 +149,47 @@ def test_group_by_installation_splits_and_sorts():
     assert [o.object_id for o in ungrouped] == ["binary-value,9"]
 
 
-def test_group_by_installation_flat_when_single_installation():
-    # One installation only: grouping buys nothing, keep the flat picker.
+def test_group_by_installation_single_installation_still_groups():
+    # Even one installation benefits from short labels and its own section.
     heat = _Obj("analog-input,1", tree_path=_HEAT, equipment_index=2)
     loose = _Obj("binary-value,9")
     groups, ungrouped = siemens.group_by_installation([heat, loose])
-    assert groups is None
-    assert ungrouped == [heat, loose]
-    # Non-Siemens device (no tree paths at all) likewise stays flat.
+    assert list(groups) == ["Production de chaleur"]
+    assert ungrouped == [loose]
+    # Non-Siemens device (no installation at all) keeps the flat picker.
     groups, ungrouped = siemens.group_by_installation([loose])
     assert groups is None
+    assert ungrouped == [loose]
+
+
+def test_equipment_index_from_paths_prefix_match():
+    system_paths = [
+        ["Gymnase", "LT", "Production de chaleur"],
+        ["Gymnase", "Salle", "CTA"],
+    ]
+    # Heat point: matches the first system path -> index 2.
+    assert siemens.equipment_index_from_paths(_HEAT, system_paths) == 2
+    assert siemens.equipment_index_from_paths(_AHU, system_paths) == 2
+    # No system path is a prefix -> None.
+    assert siemens.equipment_index_from_paths(
+        ["Autre", "Chemin", "Point"], system_paths
+    ) is None
+    assert siemens.equipment_index_from_paths(None, system_paths) is None
+    assert siemens.equipment_index_from_paths(_HEAT, []) is None
+
+
+def test_equipment_index_from_paths_shallowest_wins_and_proper_prefix():
+    # Nested system nodes: the shallowest wins (same rule as object-names).
+    nested = [
+        ["Gymnase", "LT", "Production de chaleur"],
+        ["Gymnase", "LT", "Production de chaleur", "Chaudière"],
+    ]
+    assert siemens.equipment_index_from_paths(_HEAT, nested) == 2
+    # A path equal to the point's own path is not an ancestor.
+    assert siemens.equipment_index_from_paths(
+        ["Gymnase", "LT", "Production de chaleur"],
+        [["Gymnase", "LT", "Production de chaleur"]],
+    ) is None
 
 
 def test_group_by_installation_disambiguates_same_name_across_areas():

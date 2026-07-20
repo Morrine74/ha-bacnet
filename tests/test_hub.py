@@ -287,3 +287,37 @@ def test_schedule_member_texts_none_when_analog_member():
         "active_text": None,
         "inactive_text": None,
     }
+
+
+def test_structured_view_types_collects_node_types_and_system_paths():
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("structured-view,1", "object-name"): "Gym'LT'HGen",
+            ("structured-view,1", "node-type"): "<NodeType: system>",
+            ("structured-view,2", "object-name"): "Gym'LT'HGen'Bo",
+            ("structured-view,2", "node-type"): "functional",
+            # node-type unreadable: skipped entirely.
+            ("structured-view,3", "object-name"): "Gym'X",
+        }
+    )
+    paths = {
+        "structured-view,1": ["Gymnase", "LT", "Production de chaleur"],
+    }
+
+    async def _fake_tree_path(address, object_id):
+        return paths.get(object_id)
+
+    instance.async_read_tree_path = _fake_tree_path
+
+    node_types, system_paths = asyncio.run(
+        instance._async_structured_view_types(
+            "192.168.0.20",
+            ["structured-view,1", "structured-view,2", "structured-view,3",
+             "analog-input,7"],
+        )
+    )
+    assert node_types == {"Gym'LT'HGen": "system", "Gym'LT'HGen'Bo": "functional"}
+    # Only system nodes contribute a path (for the prefix-match fallback).
+    assert system_paths == [["Gymnase", "LT", "Production de chaleur"]]

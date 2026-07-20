@@ -83,6 +83,29 @@ def find_equipment_index(
     return None
 
 
+def equipment_index_from_paths(
+    tree_path: list[str] | None, system_paths: list[list[str]]
+) -> int | None:
+    """Fallback: locate the installation level by tree-path prefix matching.
+
+    ``system_paths`` are the 4397 tree paths of the structured-views whose
+    node-type is ``system``. A point belongs to the installation whose path is
+    a proper prefix of its own path; the installation level is that path's last
+    segment. Like :func:`find_equipment_index`, the shallowest match wins.
+    Unlike it, this needs no alignment between object-names and the tree —
+    only the friendly paths themselves.
+    """
+    if not tree_path:
+        return None
+    best: int | None = None
+    for system_path in system_paths:
+        depth = len(system_path)
+        if 0 < depth < len(tree_path) and tree_path[:depth] == system_path:
+            index = depth - 1
+            best = index if best is None else min(best, index)
+    return best
+
+
 def build_split(
     tree_path: list[str] | None, equipment_index: int | None
 ) -> PathSplit:
@@ -136,9 +159,9 @@ def group_by_installation(objects: list) -> tuple[dict[str, list] | None, list]:
     Returns ``(groups, ungrouped)`` where ``groups`` maps a unique display name
     (the installation, disambiguated by its area when two areas contain a
     same-named installation) to its points, sorted by label, and ``ungrouped``
-    collects points without an installation level. With fewer than two
-    installations grouping buys nothing, so ``(None, objects)`` is returned and
-    the caller keeps its flat picker.
+    collects points without an installation level. When no installation exists
+    at all (typically a non-Siemens device), ``(None, objects)`` is returned
+    and the caller keeps its flat picker.
     """
     by_install: dict[tuple[str, str], list] = {}
     ungrouped: list = []
@@ -150,7 +173,7 @@ def group_by_installation(objects: list) -> tuple[dict[str, list] | None, list]:
             by_install.setdefault((split.area or "", split.equipment), []).append(obj)
         else:
             ungrouped.append(obj)
-    if len(by_install) < 2:
+    if not by_install:
         return None, objects
 
     names = [equipment for (_area, equipment) in by_install]

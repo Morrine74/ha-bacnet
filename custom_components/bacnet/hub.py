@@ -23,7 +23,11 @@ from .const import (
     SIEMENS_VENDOR_ID,
     STRUCTURED_VIEW,
 )
-from .siemens import find_equipment_index
+from .siemens import (
+    EQUIPMENT_NODE_TYPES,
+    equipment_index_from_paths,
+    find_equipment_index,
+)
 
 try:
     # BACnet protocol errors (unknown-property, write-access-denied, ...) are
@@ -462,31 +466,40 @@ class BACnetHub:
 
     async def _async_structured_view_types(
         self, address: str, object_ids: list[str]
-    ) -> dict[str, str]:
-        """Map each structured-view's object-name to its node-type token.
+    ) -> tuple[dict[str, str], list[list[str]]]:
+        """Read the structured-view plant tree of a Siemens device.
 
         Siemens describes the plant tree with structured-view (type 29) objects;
         ``node-type`` ("system" for an installation, "functional" for a
         sub-part, "building"/"floor"/... for location) tells us where to draw the
-        equipment boundary. Failures are skipped so discovery is never blocked.
+        equipment boundary. Returns ``(node_types, system_paths)``:
+        ``node_types`` maps each structured-view's object-name to its node-type
+        token (for the object-name prefix match) and ``system_paths`` collects
+        the 4397 tree paths of the ``system`` nodes (for the path prefix
+        fallback when object-names do not align with the tree). Failures are
+        logged at debug level and skipped so discovery is never blocked.
         """
-        result: dict[str, str] = {}
+        node_types: dict[str, str] = {}
+        system_paths: list[list[str]] = []
         for object_id in object_ids:
             if not object_id.startswith(STRUCTURED_VIEW):
                 continue
-            name = None
-            with suppress(BACnetHubError):
-                name = str(
-                    await self.async_read_property(address, object_id, "object-name")
-                )
-            if not name:
+            name = await self._async_read_optional(
+                address, object_id, "object-name"
+            )
+            node_type = await self._async_read_optional(
+                address, object_id, PROP_NODE_TYPE
+            )
+            if node_type is None:
                 continue
-            with suppress(BACnetHubError):
-                node_type = await self.async_read_property(
-                    address, object_id, PROP_NODE_TYPE
-                )
-                result[name] = _node_type_token(node_type)
-        return result
+            token = _node_type_token(node_type)
+            if name:
+                node_types[str(name)] = token
+            if token in EQUIPMENT_NODE_TYPES:
+                path = await self.async_read_tree_path(address, object_id)
+                if path:
+                    system_paths.append(path)
+        return node_types, system_paths
 
     async def _async_read_optional(
         self, address: str, object_id: str, prop: str
@@ -593,8 +606,9 @@ class BACnetHub:
         is_siemens = vendor_id == SIEMENS_VENDOR_ID
         object_ids = await self.async_object_list(address, device_id)
         sv_node_types: dict[str, str] = {}
+        system_paths: list[list[str]] = []
         if is_siemens:
-            sv_node_types = await self._async_structured_view_types(
+            sv_node_types, system_paths = await self._async_structured_view_types(
                 address, object_ids
             )
         objects: list[DiscoveredObject] = []
@@ -624,6 +638,12 @@ class BACnetHub:
                 )
             if is_siemens and name:
                 equipment_index = find_equipment_index(name, sv_node_types)
+            if is_siemens and equipment_index is None:
+                # Object-names did not align with the structured-view chain;
+                # fall back to matching the friendly paths themselves.
+                equipment_index = equipment_index_from_paths(
+                    tree_path, system_paths
+                )
             with suppress(BACnetHubError):
                 description = str(
                     await self.async_read_property(
@@ -679,6 +699,23 @@ class BACnetHub:
                     tree_path=tree_path,
                     equipment_index=equipment_index,
                 )
+            )
+        if is_siemens and objects and not any(
+            o.equipment_index is not None for o in objects
+        ):
+            # One loud, self-contained line: everything needed to understand
+            # why installation grouping found nothing on this controller.
+            _LOGGER.warning(
+                "Siemens installation grouping found no 'system' node on %s: "
+                "%d structured-view(s) read as %s; %d system path(s): %s; "
+                "sample object names: %s. Points will not be grouped by "
+                "installation.",
+                address,
+                len(sv_node_types),
+                dict(list(sv_node_types.items())[:25]),
+                len(system_paths),
+                system_paths[:5],
+                [o.name for o in objects[:5]],
             )
         return objects
 
