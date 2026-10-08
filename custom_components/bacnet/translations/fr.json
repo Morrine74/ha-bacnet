@@ -28,6 +28,7 @@
           "add_by_ip": "Ajouter un périphérique par adresse IP",
           "manage_device": "Gérer un périphérique (ajouter/retirer des points)",
           "rename_device": "Renommer un périphérique",
+          "change_address": "Changer l'adresse IP d'un périphérique",
           "settings": "Paramètres d'interrogation",
           "remove_device": "Supprimer un périphérique"
         }
@@ -55,6 +56,20 @@
         "description": "Nouveau nom pour {device}.",
         "data": {
           "device_name": "Nom du périphérique"
+        }
+      },
+      "change_address": {
+        "title": "Changer l'adresse IP d'un périphérique",
+        "data": {
+          "device": "Périphérique"
+        }
+      },
+      "change_address_value": {
+        "title": "Changer l'adresse IP d'un périphérique",
+        "description": "Nouvelle adresse pour {device}. Les entités et leur historique sont conservés : le périphérique est identifié par son numéro d'instance, pas par son adresse. Par défaut, le périphérique doit répondre à la nouvelle adresse avec le même numéro d'instance ; décochez la vérification s'il n'est pas encore joignable.",
+        "data": {
+          "address": "Nouvelle adresse IP (ex. 192.168.0.99 ou 192.168.0.99:47808)",
+          "verify_address": "Vérifier que le périphérique répond à cette adresse"
         }
       },
       "add_by_ip": {
@@ -88,6 +103,13 @@
           "device": "Périphérique"
         }
       }
+    },
+    "error": {
+      "address_required": "Saisissez une adresse.",
+      "not_loaded": "L'intégration doit être chargée pour vérifier l'adresse. Décochez la vérification pour enregistrer quand même.",
+      "discovery_failed": "Échec de la découverte. Vérifiez la configuration réseau.",
+      "device_not_found": "Aucun périphérique n'a répondu à cette adresse IP.",
+      "device_id_mismatch": "Un autre périphérique (numéro d'instance différent) a répondu à cette adresse."
     },
     "abort": {
       "not_loaded": "L'intégration doit être chargée pour découvrir les périphériques.",

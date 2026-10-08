@@ -25,6 +25,7 @@ from .const import (
     CONF_LOCAL_OBJECT_NAME,
     CONF_SCAN_INTERVAL,
     CONF_USE_COV,
+    CONF_VERIFY_ADDRESS,
     CONF_WRITE_PRIORITY,
     DEFAULT_COV_LIFETIME,
     DEFAULT_DISCOVERY_TIMEOUT,
@@ -195,6 +196,7 @@ class BACnetOptionsFlow(OptionsFlow):
                 "add_by_ip",
                 "manage_device",
                 "rename_device",
+                "change_address",
                 "settings",
                 "remove_device",
             ],
@@ -253,6 +255,108 @@ class BACnetOptionsFlow(OptionsFlow):
                 "device": f"{device.name} ({device.address})"
             },
         )
+
+    async def async_step_change_address(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a configured device whose IP address changed."""
+        if not self._devices:
+            return self.async_abort(reason="no_devices_configured")
+
+        if user_input is not None:
+            device = next(
+                (
+                    d
+                    for d in self._devices
+                    if d.device_id == int(user_input["device"])
+                ),
+                None,
+            )
+            if device is None:
+                return self.async_abort(reason="no_devices_configured")
+            self._selected_device = device
+            return await self.async_step_change_address_value()
+
+        options = {
+            str(d.device_id): f"{d.name} ({d.address})" for d in self._devices
+        }
+        return self.async_show_form(
+            step_id="change_address",
+            data_schema=vol.Schema({vol.Required("device"): vol.In(options)}),
+        )
+
+    async def async_step_change_address_value(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Save the new address of the selected device.
+
+        Points and their entities are keyed by the device instance, not by the
+        address, so the device keeps its entities (and their history) after the
+        entry reloads. By default the new address is checked with a directed
+        Who-Is: the device must answer there with the same instance number.
+        The check can be skipped when the device is not reachable yet.
+        """
+        device = self._selected_device
+        assert device is not None
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            address = user_input["address"].strip()
+            if not address:
+                errors["address"] = "address_required"
+            elif user_input.get(CONF_VERIFY_ADDRESS, True):
+                errors = await self._async_check_address(device, address)
+
+            if not errors:
+                device.address = address
+                return self._save(
+                    {CONF_DEVICES: [d.to_dict() for d in self._devices]}
+                )
+
+        return self.async_show_form(
+            step_id="change_address_value",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "address",
+                        default=(user_input or {}).get("address", device.address),
+                    ): str,
+                    vol.Optional(
+                        CONF_VERIFY_ADDRESS,
+                        default=(user_input or {}).get(CONF_VERIFY_ADDRESS, True),
+                    ): bool,
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "device": f"{device.name} ({device.address})"
+            },
+        )
+
+    async def _async_check_address(
+        self, device: DeviceConfig, address: str
+    ) -> dict[str, str]:
+        """Return form errors if ``device`` does not answer at ``address``."""
+        hub = self._hub()
+        if hub is None or not hub.started:
+            return {"base": "not_loaded"}
+        try:
+            found = await hub.async_who_is(
+                address=address, timeout=DEFAULT_DISCOVERY_TIMEOUT
+            )
+        except BACnetHubError:
+            return {"base": "discovery_failed"}
+        if not found:
+            return {"base": "device_not_found"}
+        if found[0].device_id != device.device_id:
+            _LOGGER.warning(
+                "Device at %s answered as instance %s, expected %s",
+                address,
+                found[0].device_id,
+                device.device_id,
+            )
+            return {"base": "device_id_mismatch"}
+        return {}
 
     async def async_step_manage_device(
         self, user_input: dict[str, Any] | None = None

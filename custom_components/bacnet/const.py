@@ -32,6 +32,8 @@ CONF_ACTIVE_TEXT: Final = "active_text"
 CONF_INACTIVE_TEXT: Final = "inactive_text"
 CONF_TREE_PATH: Final = "tree_path"
 CONF_EQUIPMENT_INDEX: Final = "equipment_index"
+# Options-flow form field: check the device answers at a new address.
+CONF_VERIFY_ADDRESS: Final = "verify_address"
 
 # Defaults
 DEFAULT_LOCAL_OBJECT_ID: Final = 599

@@ -62,6 +62,11 @@ The integration is configured entirely through the UI (Config Flow):
    and validate everything in one go.
 3. For each point you can enable **COV** (push updates) and set a default
    **write priority** (1–16).
+4. **Options → Change a device's IP address** — when a controller moves to
+   another address, update it here instead of removing and re-adding the
+   device. Entities and their history are kept (they are keyed by the
+   device instance). The new address is checked with a directed Who-Is
+   unless you untick the verification.
 
 Points map to Home Assistant entities as follows:
 

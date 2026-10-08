@@ -28,6 +28,7 @@
           "add_by_ip": "Add a device by IP address",
           "manage_device": "Manage a device (add/remove points)",
           "rename_device": "Rename a device",
+          "change_address": "Change a device's IP address",
           "settings": "Polling settings",
           "remove_device": "Remove a device"
         }
@@ -49,6 +50,20 @@
         "description": "New name for {device}.",
         "data": {
           "device_name": "Device name"
+        }
+      },
+      "change_address": {
+        "title": "Change a device's IP address",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "change_address_value": {
+        "title": "Change a device's IP address",
+        "description": "New address for {device}. Entities and their history are kept: the device is identified by its instance number, not by its address. By default the device must answer at the new address with the same instance number; untick the check if it is not reachable yet.",
+        "data": {
+          "address": "New IP address (e.g. 192.168.0.99 or 192.168.0.99:47808)",
+          "verify_address": "Check that the device answers at this address"
         }
       },
       "discover": {
@@ -88,6 +103,13 @@
           "device": "Device"
         }
       }
+    },
+    "error": {
+      "address_required": "Enter an address.",
+      "not_loaded": "The integration must be loaded to check the address. Untick the check to save anyway.",
+      "discovery_failed": "Discovery failed. Check the network configuration.",
+      "device_not_found": "No device responded at that IP address.",
+      "device_id_mismatch": "A different device (other instance number) answered at that address."
     },
     "abort": {
       "not_loaded": "The integration must be loaded to discover devices.",
