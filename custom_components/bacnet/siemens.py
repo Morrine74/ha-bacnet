@@ -8,8 +8,8 @@ authoritatively:
   upper levels -> they become the Home Assistant **area**;
 - a ``system`` node is an **installation** (Production de chaleur, Circuit de
   chauffage, CTA ...) -> it becomes the HA **sub-device** that groups points;
-- ``functional`` nodes below it (Chaudière, Pompe, Batterie chaude ...) are kept
-  as a breadcrumb inside the entity **name**.
+- ``functional`` nodes below it (Chaudière, Pompe, Batterie chaude ...) only
+  show as a breadcrumb in the point picker; the entity **name** is the leaf.
 
 Each point also exposes property 4397, an ``ArrayOf(CharacterString)`` with the
 full friendly path, e.g.::
@@ -51,6 +51,16 @@ class PathSplit:
     equipment: str | None
     name: str
     segments: list[str]
+
+    @property
+    def leaf(self) -> str | None:
+        """Return the last path segment: the point's own short friendly name.
+
+        This is what the entity is called in Home Assistant. The functional
+        breadcrumb kept in ``name`` only serves the point picker, where two
+        same-named leaves (one per boiler, say) must stay distinguishable.
+        """
+        return self.segments[-1] if self.segments else None
 
 
 def _normalize(text: str) -> str:
@@ -114,8 +124,9 @@ def build_split(
     ``equipment_index`` is the index of the installation level (from
     :func:`find_equipment_index`). Segments before it form the area, the segment
     at it is the equipment sub-device, and everything after it (functional
-    breadcrumb + leaf) forms the entity name. When there is no equipment level
-    the point keeps just its leaf name and stays attached to the controller.
+    breadcrumb + leaf) forms the picker label ``name``; the entity itself is
+    named after ``leaf``. When there is no equipment level the point keeps
+    just its leaf name and stays attached to the controller.
     """
     segments = [s.strip() for s in (tree_path or []) if s and s.strip()]
     if not segments:

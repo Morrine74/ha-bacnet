@@ -208,9 +208,19 @@ def test_schedule_member_target_local_reference():
     assert hub._schedule_member_target(ref) == "multi-state-value,12"
 
 
+def test_schedule_member_target_accepts_own_device_reference():
+    # Siemens fills deviceIdentifier with the controller's own instance.
+    own = _MemberRef(("multi-state-value", 12), device_identifier=("device", 2000))
+    assert hub._schedule_member_target(own, 2000) == "multi-state-value,12"
+    # Unknown device id: still tried locally (a bad read is just skipped).
+    assert hub._schedule_member_target(own) == "multi-state-value,12"
+
+
 def test_schedule_member_target_skips_remote_and_malformed():
     remote = _MemberRef(("binary-value", 3), device_identifier=("device", 99))
-    assert hub._schedule_member_target(remote) is None
+    assert hub._schedule_member_target(remote, 2000) is None
+    broken = _MemberRef(("binary-value", 3), device_identifier=("device",))
+    assert hub._schedule_member_target(broken, 2000) is None
     assert hub._schedule_member_target(_MemberRef(None)) is None
     assert hub._schedule_member_target(_MemberRef(("analog-value",))) is None
     assert hub._schedule_member_target(object()) is None
@@ -262,11 +272,35 @@ def test_schedule_member_texts_from_binary_member():
         }
     )
     texts = asyncio.run(
-        instance._async_schedule_member_texts("192.168.0.20", "schedule,2")
+        instance._async_schedule_member_texts(
+            "192.168.0.20", "schedule,2", device_id=2000
+        )
     )
     assert texts["state_texts"] is None
     assert texts["active_text"] == "Marche"
     assert texts["inactive_text"] == "Arrêt"
+
+
+def test_schedule_member_texts_siemens_self_referencing_member():
+    """Siemens references carry the controller's own device id: still local."""
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("schedule,4", "list-of-object-property-references"): [
+                _MemberRef(
+                    ("multi-state-value", 8), device_identifier=("device", 2000)
+                )
+            ],
+            ("multi-state-value,8", "state-text"): ["Confort", "Réduit"],
+        }
+    )
+    texts = asyncio.run(
+        instance._async_schedule_member_texts(
+            "192.168.0.20", "schedule,4", device_id=2000
+        )
+    )
+    assert texts["state_texts"] == ["Confort", "Réduit"]
 
 
 def test_schedule_member_texts_none_when_analog_member():

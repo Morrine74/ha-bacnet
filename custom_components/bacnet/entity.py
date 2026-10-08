@@ -49,9 +49,10 @@ class BACnetEntity(CoordinatorEntity[BACnetCoordinator]):
         self._split, self._equipment_slug = point_grouping(
             device.device_id, point
         )
-        # With a Siemens tree path, the equipment is the HA sub-device name, so
-        # the entity keeps only the leaf (plus any breadcrumb) as its own name.
-        self._attr_name = self._split.name or point.name or point.object_id
+        # With a Siemens tree path, the installation is the HA sub-device name
+        # and the entity keeps only the leaf as its own short friendly name
+        # ("Température au retour"). The full path stays in the attributes.
+        self._attr_name = self._split.leaf or point.name or point.object_id
 
     @property
     def device_info(self) -> DeviceInfo:

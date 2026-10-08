@@ -681,7 +681,7 @@ class BACnetHub:
                 # first member object they command, so the schedule entity
                 # displays "Comfort" instead of a bare number.
                 member = await self._async_schedule_member_texts(
-                    address, object_id
+                    address, object_id, device_id=device_id
                 )
                 state_text = member["state_texts"]
                 active_text = member["active_text"]
@@ -877,7 +877,7 @@ class BACnetHub:
         }
 
     async def _async_schedule_member_texts(
-        self, address: str, object_id: str
+        self, address: str, object_id: str, device_id: int | None = None
     ) -> dict[str, Any]:
         """Resolve display texts for a Schedule's values from its members.
 
@@ -886,6 +886,13 @@ class BACnetHub:
         ``list-of-object-property-references`` to the first *local* member of a
         text-bearing type and read its ``state-text`` (multi-state) or
         ``active-text``/``inactive-text`` (binary).
+
+        ``device_id`` is the instance of the device hosting the schedule. Some
+        controllers (Siemens among them) fill each reference's optional
+        ``deviceIdentifier`` with their own instance; such members are local
+        and must not be skipped. When ``device_id`` is unknown, references with
+        a device identifier are still tried on ``address``: an object that does
+        not exist there simply fails to read and is skipped.
         """
         texts: dict[str, Any] = {
             "state_texts": None,
@@ -895,10 +902,18 @@ class BACnetHub:
         refs = await self._async_read_optional(
             address, object_id, "list-of-object-property-references"
         )
+        members: list[str] = []
         for ref in refs or []:
-            member_id = _schedule_member_target(ref)
+            member_id = _schedule_member_target(ref, device_id)
             if member_id is None:
+                _LOGGER.debug(
+                    "Schedule %s@%s: skipping member reference %r",
+                    object_id,
+                    address,
+                    ref,
+                )
                 continue
+            members.append(member_id)
             kind = member_id.split(",", 1)[0].casefold().replace("-", "")
             if kind.startswith("multistate"):
                 raw = await self._async_read_optional(
@@ -923,6 +938,14 @@ class BACnetHub:
                         None if inactive is None else str(inactive)
                     )
                     return texts
+        _LOGGER.debug(
+            "Schedule %s@%s: no display texts found (%d reference(s), "
+            "local members tried: %s)",
+            object_id,
+            address,
+            len(refs or []),
+            members,
+        )
         return texts
 
     async def async_write_schedule(
@@ -1087,15 +1110,24 @@ def _object_ids_to_str(ids: Any) -> list[str]:
     return result
 
 
-def _schedule_member_target(ref: Any) -> str | None:
+def _schedule_member_target(
+    ref: Any, device_id: int | None = None
+) -> str | None:
     """Return the local ``type,instance`` a schedule member reference targets.
 
-    Schedule members are ``DeviceObjectPropertyReference`` items. References
-    that point at another device (``deviceIdentifier`` set) or that cannot be
-    parsed yield ``None``.
+    Schedule members are ``DeviceObjectPropertyReference`` items whose
+    ``deviceIdentifier`` is optional. A reference is local when that field is
+    absent or names ``device_id`` (the schedule's own device). It points at
+    another device, and yields ``None``, only when it names a different
+    instance than a known ``device_id``. Unparseable references yield ``None``.
     """
-    if getattr(ref, "deviceIdentifier", None) is not None:
-        return None
+    device_ref = getattr(ref, "deviceIdentifier", None)
+    if device_ref is not None and device_id is not None:
+        try:
+            if int(device_ref[1]) != int(device_id):
+                return None
+        except (TypeError, IndexError, ValueError):
+            return None
     member = getattr(ref, "objectIdentifier", None)
     if member is None:
         return None

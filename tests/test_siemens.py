@@ -205,3 +205,14 @@ def test_group_by_installation_disambiguates_same_name_across_areas():
     )
     groups, _ungrouped = siemens.group_by_installation([a, b])
     assert list(groups) == ["CTA — Bât. A", "CTA — Bât. B"]
+
+
+def test_split_leaf_is_short_entity_name():
+    split = build_split(
+        ["Gymnase", "Locaux Techniques", "Production de chaleur",
+         "Chaudière", "Température au retour"],
+        2,
+    )
+    assert split.name == "Chaudière · Température au retour"
+    assert split.leaf == "Température au retour"
+    assert build_split(None, None).leaf is None
