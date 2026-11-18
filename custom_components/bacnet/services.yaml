@@ -136,8 +136,9 @@ write_schedule:
     value_type:
       name: Value type
       description: >-
-        Datatype of the schedule entry values. Leave empty to auto-detect from
-        the object's schedule-default property.
+        Hint for the datatype of the entry values, used only when the device
+        reveals none (Null schedule-default and an empty week). Otherwise the
+        device's own type is always used.
       example: real
       selector:
         select:

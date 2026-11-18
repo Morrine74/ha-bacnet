@@ -109,9 +109,45 @@ def test_normalize_time_string_invalid_raises():
         hub._normalize_time_string("garbage")
 
 
-def test_infer_value_type_defaults_to_real_when_empty():
-    assert hub._infer_value_type_from_weekly(None) == "real"
-    assert hub._infer_value_type_from_weekly([[], [], []]) == "real"
+def test_infer_value_type_none_when_nothing_is_typed():
+    assert hub._infer_value_type_from_weekly(None) is None
+    assert hub._infer_value_type_from_weekly([[], [], []]) is None
+
+
+def test_bacpypes_type_name_unwraps_any_atomic():
+    """Schedule values arrive wrapped in AnyAtomic: the type is inside."""
+    import pytest
+
+    pytest.importorskip("bacpypes3")
+    from bacpypes3.basetypes import BinaryPV
+    from bacpypes3.constructeddata import AnyAtomic
+    from bacpypes3.primitivedata import Null, Real as BReal, Unsigned as BUnsigned
+
+    assert hub._bacpypes_type_name(AnyAtomic(BUnsigned(2))) == "unsigned"
+    assert hub._bacpypes_type_name(AnyAtomic(BReal(21.5))) == "real"
+    # An enumeration subclass is still an Enumerated on the wire.
+    assert hub._bacpypes_type_name(AnyAtomic(BinaryPV("active"))) == "enumerated"
+    assert hub._bacpypes_type_name(BinaryPV("active")) == "enumerated"
+    # Null ("no action") says nothing about the datatype.
+    assert hub._bacpypes_type_name(AnyAtomic(Null(()))) is None
+
+
+def test_schedule_value_type_resolution_order():
+    no_texts = {"state_texts": None, "active_text": None, "inactive_text": None}
+    week = [_DayWithValue(Unsigned())]
+    assert hub._schedule_value_type(Real(), week, None, no_texts) == "real"
+    assert hub._schedule_value_type(None, week, Real(), no_texts) == "unsigned"
+    assert hub._schedule_value_type(None, None, Enumerated(), no_texts) == "enumerated"
+    # Nothing typed on the schedule itself: the commanded object decides.
+    assert (
+        hub._schedule_value_type(None, [], None, {**no_texts, "state_texts": ["A"]})
+        == "unsigned"
+    )
+    assert (
+        hub._schedule_value_type(None, [], None, {**no_texts, "active_text": "On"})
+        == "enumerated"
+    )
+    assert hub._schedule_value_type(None, [], None, no_texts) == "real"
 
 
 class _DayWithValue:
@@ -321,6 +357,63 @@ def test_schedule_member_texts_none_when_analog_member():
         "active_text": None,
         "inactive_text": None,
     }
+
+
+def test_schedule_member_texts_siemens_sibling_without_members():
+    """No member reference: texts come from the PrOpMod next to the schedule."""
+    import asyncio
+
+    instance = _hub_with_reads(
+        {
+            ("schedule,6", "list-of-object-property-references"): [],
+            ("schedule,6", "object-name"): "EREP'R+1'LT_CTA'Ahu'Sched",
+            ("multi-state-value,16", "state-text"): ["Arrêt", "Marche"],
+        }
+    )
+    asked = []
+
+    async def _fake_find(address, object_name):
+        asked.append(object_name)
+        return "multi-state-value,16"
+
+    instance._async_find_object_by_name = _fake_find
+    texts = asyncio.run(
+        instance._async_schedule_member_texts("192.168.0.182", "schedule,6")
+    )
+    assert asked == ["EREP'R+1'LT_CTA'Ahu'PrOpMod"]
+    assert texts["state_texts"] == ["Arrêt", "Marche"]
+
+
+def test_write_schedule_uses_the_device_type_over_a_wrong_hint():
+    """A multi-state schedule is written Unsigned whatever the caller asked."""
+    import asyncio
+
+    import pytest
+
+    pytest.importorskip("bacpypes3")
+    from bacpypes3.constructeddata import AnyAtomic
+    from bacpypes3.primitivedata import Unsigned as BUnsigned
+
+    instance = _hub_with_reads(
+        {("schedule,6", "schedule-default"): AnyAtomic(BUnsigned(1))}
+    )
+    written = {}
+
+    async def _fake_write(address, object_id, prop, value, **kwargs):
+        written["value"] = value
+
+    instance.async_write_property = _fake_write
+    week = [[{"time": "06:00", "value": 2}, {"time": "19:00", "value": None}]]
+    asyncio.run(
+        instance.async_write_schedule(
+            "192.168.0.182", "schedule,6", week, value_type="enumerated"
+        )
+    )
+    entries = written["value"][0].daySchedule
+    # TimeValue wraps its value in AnyAtomic: the wire type is inside.
+    assert type(entries[0].value.get_value()).__name__ == "Unsigned"
+    assert type(entries[1].value.get_value()).__name__ == "Null"
+    assert len(written["value"]) == 7
 
 
 def test_structured_view_types_collects_node_types_and_system_paths():

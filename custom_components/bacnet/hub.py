@@ -43,6 +43,10 @@ except ImportError:  # pragma: no cover - bacpypes3 always present at runtime
 
 _LOGGER = logging.getLogger(__name__)
 
+# Siemens short names of the object a plant schedule drives, looked up next to
+# the schedule (same parent in the object-name) when it lists no member.
+SIEMENS_SCHEDULE_SIBLINGS: tuple[str, ...] = ("PrOpMod",)
+
 
 @dataclass(slots=True)
 class DiscoveredDevice:
@@ -857,13 +861,12 @@ class BACnetHub:
             self._async_read_optional(address, object_id, "schedule-default"),
         )
 
-        value_type = _bacpypes_type_name(schedule_default)
-        if value_type is None:
-            value_type = _infer_value_type_from_weekly(weekly)
-
         # Human-readable labels for the scheduled values (a Schedule object has
         # none of its own; they live on the member objects it commands).
         member_texts = await self._async_schedule_member_texts(address, object_id)
+        value_type = _schedule_value_type(
+            schedule_default, weekly, present_value, member_texts
+        )
 
         return {
             "weekly_schedule": _serialize_weekly_schedule(weekly),
@@ -914,30 +917,18 @@ class BACnetHub:
                 )
                 continue
             members.append(member_id)
-            kind = member_id.split(",", 1)[0].casefold().replace("-", "")
-            if kind.startswith("multistate"):
-                raw = await self._async_read_optional(
-                    address, member_id, "state-text"
-                )
-                state_texts = [str(item) for item in raw or []] or None
-                if state_texts:
-                    texts["state_texts"] = state_texts
-                    return texts
-            elif kind.startswith("binary"):
-                active = await self._async_read_optional(
-                    address, member_id, "active-text"
-                )
-                inactive = await self._async_read_optional(
-                    address, member_id, "inactive-text"
-                )
-                if active is not None or inactive is not None:
-                    texts["active_text"] = (
-                        None if active is None else str(active)
-                    )
-                    texts["inactive_text"] = (
-                        None if inactive is None else str(inactive)
-                    )
-                    return texts
+            if await self._async_fill_object_texts(address, member_id, texts):
+                return texts
+        if not members:
+            # Siemens plant schedules reference no member at all: the block
+            # they drive is wired inside the controller. The values are those
+            # of the operating mode next to the schedule in the plant tree
+            # (``...'Ahu'Sched`` schedules ``...'Ahu'PrOpMod``).
+            sibling = await self._async_siemens_schedule_sibling(address, object_id)
+            if sibling and await self._async_fill_object_texts(
+                address, sibling, texts
+            ):
+                return texts
         _LOGGER.debug(
             "Schedule %s@%s: no display texts found (%d reference(s), "
             "local members tried: %s)",
@@ -947,6 +938,83 @@ class BACnetHub:
             members,
         )
         return texts
+
+    async def _async_fill_object_texts(
+        self, address: str, object_id: str, texts: dict[str, Any]
+    ) -> bool:
+        """Copy an object's state / active / inactive texts into ``texts``.
+
+        Returns True when the object is of a text-bearing type and had some.
+        """
+        kind = object_id.split(",", 1)[0].casefold().replace("-", "")
+        if kind.startswith("multistate"):
+            raw = await self._async_read_optional(address, object_id, "state-text")
+            state_texts = [str(item) for item in raw or []] or None
+            if state_texts:
+                texts["state_texts"] = state_texts
+                return True
+        elif kind.startswith("binary"):
+            active = await self._async_read_optional(
+                address, object_id, "active-text"
+            )
+            inactive = await self._async_read_optional(
+                address, object_id, "inactive-text"
+            )
+            if active is not None or inactive is not None:
+                texts["active_text"] = None if active is None else str(active)
+                texts["inactive_text"] = None if inactive is None else str(inactive)
+                return True
+        return False
+
+    async def _async_siemens_schedule_sibling(
+        self, address: str, object_id: str
+    ) -> str | None:
+        """Return the operating-mode object a Siemens schedule drives.
+
+        Resolved by name: the schedule ``<plant>'Sched`` sits next to
+        ``<plant>'PrOpMod`` (present operating mode), found with a directed
+        Who-Has. ``None`` on any other naming or when nothing answers.
+        """
+        name = await self._async_read_optional(address, object_id, "object-name")
+        prefix, sep, _leaf = str(name or "").rpartition("'")
+        if not sep or not prefix:
+            return None
+        for short_name in SIEMENS_SCHEDULE_SIBLINGS:
+            found = await self._async_find_object_by_name(
+                address, f"{prefix}'{short_name}"
+            )
+            if found:
+                return found
+        return None
+
+    async def _async_find_object_by_name(
+        self, address: str, object_name: str
+    ) -> str | None:
+        """Look an object up by its object-name with a directed Who-Has."""
+        from bacpypes3.pdu import Address
+
+        app = self._app
+        if app is None:
+            return None
+        try:
+            i_haves = await asyncio.wait_for(
+                app.who_has(
+                    object_name=object_name, address=Address(address), timeout=2
+                ),
+                timeout=DEFAULT_REQUEST_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return None
+        except (_BACnetProtocolError, Exception) as err:  # noqa: BLE001
+            _LOGGER.debug("Who-Has %s@%s failed: %s", object_name, address, err)
+            return None
+        for i_have in i_haves or []:
+            found = getattr(i_have, "objectIdentifier", None)
+            try:
+                return f"{found[0]},{int(found[1])}"
+            except (TypeError, IndexError, ValueError):
+                continue
+        return None
 
     async def async_write_schedule(
         self,
@@ -963,17 +1031,41 @@ class BACnetHub:
         is exactly what is seen on the wire). We therefore always build all seven
         days as properly typed ``DailySchedule`` objects and write the complete
         array (no array index), instead of forwarding a loosely typed Python
-        list. When ``value_type`` is not supplied it is auto-detected from the
-        object's ``schedule-default`` property.
+        list.
+
+        The datatype of the entries is the device's own: the one of its
+        ``schedule-default``, else of the entries it already holds. A
+        controller rejects (or mis-stores) entries of any other type, so
+        ``value_type`` is only a hint for a schedule that reveals nothing -
+        ``Null`` default and an empty week. Without a hint the type then comes
+        from the present value or the kind of object the schedule commands.
         """
-        if value_type is None:
-            with suppress(BACnetHubError):
-                default = await self.async_read_property(
-                    address, object_id, "schedule-default"
+        default, weekly, present_value = await asyncio.gather(
+            self._async_read_optional(address, object_id, "schedule-default"),
+            self._async_read_optional(address, object_id, "weekly-schedule"),
+            self._async_read_optional(address, object_id, "present-value"),
+        )
+        device_type = _bacpypes_type_name(default) or _infer_value_type_from_weekly(
+            weekly
+        )
+        if device_type is not None:
+            if value_type and value_type != device_type:
+                _LOGGER.warning(
+                    "Schedule %s@%s holds %s values: ignoring the requested "
+                    "value_type %r",
+                    object_id,
+                    address,
+                    device_type,
+                    value_type,
                 )
-                value_type = _bacpypes_type_name(default)
-        if value_type is None:
-            value_type = "real"
+            value_type = device_type
+        elif value_type is None:
+            value_type = _schedule_value_type(
+                default,
+                weekly,
+                present_value,
+                await self._async_schedule_member_texts(address, object_id),
+            )
 
         weekly_object = _build_weekly_schedule(weekly_schedule, value_type)
 
@@ -1169,33 +1261,75 @@ def _bacpypes_type_name(value: Any) -> str | None:
     """Map a bacpypes primitive instance to a canonical value-type name.
 
     Returns one of ``real``, ``unsigned``, ``integer``, ``boolean``,
-    ``enumerated`` or ``None`` when the type cannot be determined.
+    ``enumerated`` or ``None`` when the type cannot be determined (``Null``
+    included: a "no action" entry says nothing about the datatype).
+
+    Schedule values (``schedule-default``, ``present-value``, the entries of
+    ``weekly-schedule``) are ``ABSTRACT-SYNTAX.&Type`` on the wire, so
+    bacpypes3 hands them over wrapped in ``AnyAtomic``: the real primitive is
+    behind ``get_value()``. Without unwrapping, every schedule looked untyped
+    and was written back as ``Real`` - which a controller rejects, or stores
+    with the wrong datatype, on a multi-state or binary schedule.
     """
+    getter = getattr(value, "get_value", None)
+    if callable(getter):
+        try:
+            value = getter()
+        except Exception:  # noqa: BLE001 - undecodable value: type unknown
+            return None
     if value is None:
         return None
-    cls = type(value).__name__.lower()
-    if "real" in cls or "double" in cls:
-        return "real"
-    if "unsigned" in cls:
-        return "unsigned"
-    if "boolean" in cls:
-        return "boolean"
-    if "enumerated" in cls:
-        return "enumerated"
-    if "integer" in cls:
-        return "integer"
+    # Match on the whole class hierarchy: enumerations arrive as subclasses
+    # (``BinaryPV`` is an ``Enumerated``) whose own name says nothing.
+    names = [cls.__name__.lower() for cls in type(value).__mro__]
+    for token, result in (
+        ("real", "real"),
+        ("double", "real"),
+        ("unsigned", "unsigned"),
+        ("boolean", "boolean"),
+        ("enumerated", "enumerated"),
+        ("integer", "integer"),
+    ):
+        if any(token in name for name in names):
+            return result
     return None
 
 
-def _infer_value_type_from_weekly(weekly: Any) -> str:
-    """Guess the entry datatype by inspecting the first value in the schedule."""
-    if weekly is None:
-        return "real"
-    for day in weekly:
+def _infer_value_type_from_weekly(weekly: Any) -> str | None:
+    """Guess the entry datatype from the first typed value in the schedule.
+
+    Returns ``None`` when the week holds no typed entry (empty, or only
+    ``Null`` "no action" entries).
+    """
+    for day in weekly or []:
         for time_value in getattr(day, "daySchedule", day) or []:
             name = _bacpypes_type_name(getattr(time_value, "value", None))
             if name:
                 return name
+    return None
+
+
+def _schedule_value_type(
+    schedule_default: Any, weekly: Any, present_value: Any, member_texts: dict
+) -> str:
+    """Resolve the datatype a schedule's entries must be written with.
+
+    In order: ``schedule-default`` (mandatory, but ``Null`` on some
+    controllers), the existing entries, the present value, then the kind of
+    object the schedule commands - a multi-state member takes ``Unsigned``
+    values, a binary one ``Enumerated``. ``Real`` is the last resort.
+    """
+    value_type = (
+        _bacpypes_type_name(schedule_default)
+        or _infer_value_type_from_weekly(weekly)
+        or _bacpypes_type_name(present_value)
+    )
+    if value_type:
+        return value_type
+    if member_texts.get("state_texts"):
+        return "unsigned"
+    if member_texts.get("active_text") or member_texts.get("inactive_text"):
+        return "enumerated"
     return "real"
 
 
