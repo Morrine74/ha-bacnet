@@ -375,6 +375,13 @@ class BacnetHeatingCircuitCard extends HTMLElement {
       idx = Number(m[1]);
       if (sn) sn = sn.replace(/\(\d+\)\s*$/, "");
     }
+    // Heating/cooling circuits double some points: `PrSpTFl(H)` / `(C)`.
+    let mode = null;
+    const tag = /\((H|C|Chauffage|Froid)\)\s*$/i.exec(sn || leaf);
+    if (tag) {
+      mode = /^(c|froid)$/i.test(tag[1]) ? "cold" : "hot";
+      if (sn) sn = sn.replace(/\([A-Za-z]+\)\s*$/, "");
+    }
     const eqIdx = a.equipment ? path.indexOf(a.equipment) : -1;
     const domain = entityId.split(".")[0];
     const avail = st.state !== "unavailable" && st.state !== "unknown";
@@ -389,6 +396,11 @@ class BacnetHeatingCircuitCard extends HTMLElement {
       parent,
       pnorm: hcNorm(parent),
       group: path.slice(eqIdx + 1, -1).join(" · "),
+      // Where the point hangs in the plant: tells two heating curves apart.
+      branch: path.length ? path.slice(0, -1).join(" · ") : chain.slice(0, -1).join(" · "),
+      // Short names of the two levels above (`SplyChw Hcrv`): language-free.
+      branchSn: chain.slice(-3, -1).join(" "),
+      mode,
       sn,
       psn,
       idx,
@@ -476,9 +488,19 @@ class BacnetHeatingCircuitCard extends HTMLElement {
       role("tRt") ||
       find((p) => isSensor(p) && !HC_KNOWN_SN.has(p.sn) && notSetpoint(p) &&
         /temp.*retour|retour.*temp|return temp|rucklauftemp/.test(p.norm));
-    // PrSpTFl also exists on the root and on the curve: keep the hydraulic
-    // circuit's one and absorb the duplicates.
-    syn.spTFl = role("spTFl", hydFirst) || role("spTFl");
+    syn.hc = role("hc");
+    while (!forced.hc && find((p) => p.sn === "HCSta"));
+    syn.cool = !!(syn.hc && syn.hc.avail && HC_COOL_RE.test(this._dis(syn.hc)));
+    // PrSpTFl also exists on the root and on each curve: keep the hydraulic
+    // circuit's one (of the current heating/cooling state when it is doubled)
+    // and absorb the duplicates.
+    const nowMode = (p) => p.mode === (syn.cool ? "cold" : "hot");
+    syn.spTFl =
+      role("spTFl", (p) => hydFirst(p) && nowMode(p)) ||
+      role("spTFl", (p) => hydFirst(p) && !p.mode) ||
+      role("spTFl", (p) => !p.mode && !/courbe|curve|hcrv/i.test(p.branch + p.psn)) ||
+      role("spTFl", nowMode) ||
+      role("spTFl");
     while (!forced.spTFl && syn.spTFl && find((p) => p.sn === "PrSpTFl" ||
       (!HC_KNOWN_SN.has(p.sn) && HC_ROLES.spTFl.re.test(p.norm))));
     const valveParent = (p) =>
@@ -491,9 +513,6 @@ class BacnetHeatingCircuitCard extends HTMLElement {
         (valveParent(p) || /vanne|valve/.test(p.norm)));
     syn.sfty = role("sfty");
     syn.ovr = role("ovr");
-    syn.hc = role("hc");
-    while (!forced.hc && find((p) => p.sn === "HCSta"));
-    syn.cool = !!(syn.hc && syn.hc.avail && HC_COOL_RE.test(this._dis(syn.hc)));
     syn.tOa = role("tOa");
     if (!syn.tOa) {
       const address = pts.length ? pts[0].a.device_address : null;
@@ -564,10 +583,34 @@ class BacnetHeatingCircuitCard extends HTMLElement {
     );
     lists.push(list(this._t("limits"), [role("limCmf"), role("limEco")]));
 
+    // A heating/cooling circuit carries one curve per supply chain (hot
+    // water, chilled water) with the very same point names: the points of a
+    // curve are those hanging under the same parent, never a mix of both.
+    const curveKeys = ["xBase", "yBase", "xBp", "yBp", "xHi", "yHi", "yMax",
+      "yMin", "expRad", "tOaBase", "spTR"];
+    const isCurvePoint = (p) => curveKeys.some((key) => {
+      const def = HC_ROLES[key];
+      return def.sn.includes(p.sn) || (!HC_KNOWN_SN.has(p.sn) && def.re.test(p.norm));
+    });
+    const curvePoints = pts.filter((p) => !p.used && isCurvePoint(p));
+    const branchNames = [...new Set(curvePoints.map((p) => p.branch))];
+    // Only the two levels above the point are looked at: the circuit itself
+    // may well be called "chauffage/rafraîchissement".
+    const isCold = (p) =>
+      /chw|glac|froid|cool|kalt/.test(
+        hcNorm(p.branch.split(" · ").slice(-2).join(" ") + " " + p.branchSn)
+      );
+    const branches = {};
+    for (const p of curvePoints) {
+      const kind = isCold(p) ? "cold" : "hot";
+      if (!(kind in branches)) branches[kind] = p.branch;
+    }
+    const dual = "hot" in branches && "cold" in branches;
+    const wanted = this._curveBranch || (syn.cool ? "cold" : "hot");
+    const shown = wanted in branches ? wanted : "hot" in branches ? "hot" : "cold";
     const cv = {};
-    for (const key of ["xBase", "yBase", "xBp", "yBp", "xHi", "yHi", "yMax",
-      "yMin", "expRad", "tOaBase", "spTR"]) {
-      cv[key] = role(key);
+    for (const key of curveKeys) {
+      cv[key] = role(key, (p) => !branchNames.length || p.branch === branches[shown]);
     }
     const curveRows = [cv.xBase, cv.yBase, cv.xBp, cv.yBp, cv.xHi, cv.yHi,
       cv.yMin, cv.yMax, cv.expRad, cv.tOaBase, cv.spTR];
@@ -582,6 +625,7 @@ class BacnetHeatingCircuitCard extends HTMLElement {
       syn, pumps, pltSta, prOpMod,
       lists: lists.filter((l) => l.rows.length),
       curve: this._buildCurve(cv, syn),
+      curveBranch: dual ? shown : null,
       others, count: pts.length,
     };
   }
@@ -704,7 +748,7 @@ device: &lt;device id&gt;</pre>`;
     const ids = this._deviceEntityIds();
     const outside = this._config.outside_temp || this._outsideAuto || "";
     const states = this._hass.states;
-    let signature = this._hass.language + "|" + this._openOthers + "|";
+    let signature = this._hass.language + "|" + this._openOthers + "|" + this._curveBranch + "|";
     const forced = Object.values(this._config.points || {});
     for (const id of ids.concat(outside ? [outside] : [], forced)) {
       const st = states[id];
@@ -748,7 +792,12 @@ device: &lt;device id&gt;</pre>`;
       top.push(`<section class="box"><h3>${hcEsc(this._t("hydraulic"))}</h3>${this._renderSynoptic(m)}</section>`);
     }
     if (show("curve")) {
-      top.push(`<section class="box"><h3>${hcEsc(this._t("curve"))}</h3>${this._renderCurve(m.curve)}</section>`);
+      const toggle = m.curveBranch
+        ? `<div class="seg mini">${["hot", "cold"].map((b) =>
+            `<button data-act="branch" data-v="${b}" class="${b === m.curveBranch ? "sel" : ""}">${hcEsc(this._t(b === "hot" ? "heating" : "cooling"))}</button>`
+          ).join("")}</div>`
+        : "";
+      top.push(`<section class="box"><div class="box-h"><h3>${hcEsc(this._t("curve"))}</h3>${toggle}</div>${this._renderCurve(m.curve)}</section>`);
     }
     const lists = show("settings")
       ? m.lists.map((l) => this._renderList(l.title, l.rows)).join("")
@@ -950,6 +999,11 @@ device: &lt;device id&gt;</pre>`;
       if (el.id === "body") break;
       if (el.dataset.act === "others") {
         this._openOthers = !this._openOthers;
+        this._refresh();
+        return;
+      }
+      if (el.dataset.act === "branch") {
+        this._curveBranch = el.dataset.v;
         this._refresh();
         return;
       }
@@ -1341,6 +1395,10 @@ const HC_STYLE = `
     background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121); }
   .modal input:disabled { opacity: .55; }
   .seg { display: flex; gap: 8px; }
+  .box-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .box-h h3 { margin: 0; }
+  .seg.mini { gap: 4px; }
+  .seg.mini button { flex: none; padding: 3px 10px; font-size: 0.78rem; border-radius: 100px; }
   .seg button { flex: 1; padding: 9px; border-radius: 8px; cursor: pointer;
     border: 1px solid var(--divider-color, #bdbdbd); background: transparent; }
   .seg button.sel { border-color: var(--primary-color, #03a9f4); background: var(--primary-color, #03a9f4); color: #fff; font-weight: 600; }

@@ -178,6 +178,8 @@ integration creates per Siemens installation (*Circuit de chauffage*, …):
 - **Heating curve** — drawn from its base / inflexion / high points, with the
   min / max supply limits and the current operating point (outside temperature
   → supply setpoint). Click a point to change its two coordinates.
+  A heating/cooling circuit has one curve per supply chain (hot water,
+  chilled water): each is drawn on its own, with a Heating / Cooling toggle.
 - **Settings** — operating mode, room setpoints, heating limits, curve
   settings. Writable values (`number`, `select`, `switch` entities) open a
   **two-step dialog**: enter the value, then confirm the write. Read-only
