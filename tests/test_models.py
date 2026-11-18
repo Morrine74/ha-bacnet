@@ -67,6 +67,21 @@ def test_point_config_tree_path_round_trip():
     assert restored.equipment_index == 2
 
 
+def test_point_config_bacnet_name_round_trip():
+    point = models.PointConfig(
+        object_type="binary-output",
+        instance=4,
+        name="Commande",
+        bacnet_name="Gym'LT'HCrt'Pu'Cmd",
+    )
+    restored = models.PointConfig.from_dict(point.to_dict())
+    assert restored.bacnet_name == "Gym'LT'HCrt'Pu'Cmd"
+    # Entries stored before the field existed load without it.
+    legacy = point.to_dict()
+    del legacy["bacnet_name"]
+    assert models.PointConfig.from_dict(legacy).bacnet_name is None
+
+
 def test_point_config_read_only_type_not_writable():
     point = models.PointConfig(object_type="analog-input", instance=1, name="Temp")
     assert point.writable is False

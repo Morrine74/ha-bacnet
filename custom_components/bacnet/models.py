@@ -7,6 +7,7 @@ from typing import Any
 
 from .const import (
     CONF_ACTIVE_TEXT,
+    CONF_BACNET_NAME,
     CONF_COV_LIFETIME,
     CONF_DESCRIPTION,
     CONF_DEVICE_ADDRESS,
@@ -46,6 +47,7 @@ class PointConfig:
     inactive_text: str | None = None
     tree_path: list[str] | None = None
     equipment_index: int | None = None
+    bacnet_name: str | None = None
 
     @property
     def object_id(self) -> str:
@@ -73,6 +75,7 @@ class PointConfig:
             CONF_INACTIVE_TEXT: self.inactive_text,
             CONF_TREE_PATH: self.tree_path,
             CONF_EQUIPMENT_INDEX: self.equipment_index,
+            CONF_BACNET_NAME: self.bacnet_name,
         }
 
     @classmethod
@@ -94,6 +97,7 @@ class PointConfig:
             inactive_text=data.get(CONF_INACTIVE_TEXT),
             tree_path=data.get(CONF_TREE_PATH),
             equipment_index=data.get(CONF_EQUIPMENT_INDEX),
+            bacnet_name=data.get(CONF_BACNET_NAME),
         )
 
 

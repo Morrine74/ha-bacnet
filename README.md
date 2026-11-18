@@ -29,6 +29,7 @@ inside Home Assistant.
 | Trend Logs | 🧪 | `bacnet.read_trend_log` service |
 | Schedules (weekly/exception) | 🧪 | `bacnet.read_schedule` / `bacnet.write_schedule` |
 | Graphical schedule editor | ✅ | Bundled Lovelace card (auto-registered) |
+| Heating circuit overview | ✅ | Bundled Lovelace card (auto-registered) |
 | Alarms & events | 🧪 | `bacnet.acknowledge_alarm` service |
 | BACnet MS/TP (serial) | ⛔ | Planned |
 
@@ -131,16 +132,20 @@ A custom Lovelace card renders a BACnet `schedule` object as an interactive
   its own, so the integration follows its
   `list-of-object-property-references` to the first member object and uses its
   `state-text` (multi-state) or `active`/`inactive-text` (binary) — in the
-  card's palette *and* as the schedule sensor's displayed state. An explicit
-  `states:` card config overrides this.
+  card's palette *and* as the schedule sensor's displayed state. Siemens plant
+  schedules list no member: their labels are then taken from the operating
+  mode next to the schedule in the plant tree (`…'Sched` → `…'PrOpMod`). An
+  explicit `states:` card config overrides this.
 
 > **About writing:** a BACnet `weekly-schedule` is a `BACnetARRAY[7] of
 > DailySchedule`, and controllers expect the **whole week** to be written at
 > once (as you can confirm on a Wireshark capture). The integration therefore
 > always builds and sends all seven days as properly typed `DailySchedule`
-> objects. Entry values are typed (`Real`, `Unsigned`, `Enumerated`, …); the
-> type is auto-detected from the object's `schedule-default`, or can be forced
-> via the `value_type` option / card config.
+> objects. Entry values are typed (`Real`, `Unsigned`, `Enumerated`, …) and a
+> controller rejects entries of the wrong type, so the type is always the
+> device's own: that of its `schedule-default`, else of the entries it already
+> holds. The `value_type` option / card config is only a hint for a schedule
+> that reveals nothing (`Null` default and an empty week).
 
 ### Install the card
 
@@ -160,6 +165,51 @@ states:                   # optional - omit to use the device's own state texts
   - { label: "Standby",    value: 2, color: "#FCE1B6" }
   - { label: "Unoccupied", value: 0, color: "#E3EAF2" }
 ```
+
+## Heating circuit card (Lovelace card)
+
+A second bundled card shows one heating (or heating/cooling) circuit at a
+glance, from the entities of a single installation — the sub-device the
+integration creates per Siemens installation (*Circuit de chauffage*, …):
+
+- **Hydraulic synoptic** — supply / return pipes, mixing valve position,
+  single or twin pump (running, stopped, fault), supply / return temperatures
+  and the current supply setpoint. Colours swap when the circuit is cooling.
+- **Heating curve** — drawn from its base / inflexion / high points, with the
+  min / max supply limits and the current operating point (outside temperature
+  → supply setpoint). Click a point to change its two coordinates.
+- **Settings** — operating mode, room setpoints, heating limits, curve
+  settings. Writable values (`number`, `select`, `switch` entities) open a
+  **two-step dialog**: enter the value, then confirm the write. Read-only
+  values open the entity's history.
+- **Other points** — every remaining point of the installation, folded.
+
+Points are recognised the way Siemens ABT libraries (HtgCr21x/22x,
+HCcr21x/22x) name them: by the **short name** at the end of the BACnet
+object-name (`…'HCrv'TOaDsgn`, `…'Pu'Cmd`), which does not depend on the
+project language, then by the French friendly label as a fallback. The short
+names come from the `object_name` entity attribute, stored when points are
+selected — **re-run “Discover and add a device” once** on devices configured
+before v0.11.0 to get it. Any role can also be forced by hand.
+
+```yaml
+type: custom:bacnet-heating-circuit-card
+device: 0123456789abcdef          # HA device id of the installation
+title: "Circuit radiateurs"       # optional - defaults to the device name
+outside_temp: sensor.t_exterieure # optional - auto-detected on the controller
+sections: [synoptic, curve, settings, others]   # optional
+points:                           # optional role -> entity overrides
+  tFl: sensor.temperature_de_depart
+  tRt: sensor.temperature_au_retour
+  valve: number.position
+```
+
+The visual editor lists the BACnet installations, so the device id never has
+to be typed. Roles accepted under `points`: `tFl`, `tRt`, `spTFl`, `valve`,
+`cmd1`, `cmd2`, `tOa`, `hc`, `sfty`, `opModMan`, `prOpMod`, `pltSta`, the
+setpoints `spCmf` / `spPcf` / `spEco` / `spPrt`, the limits `limCmf` /
+`limEco`, and the curve `xBase` / `yBase` / `xBp` / `yBp` / `xHi` / `yHi` /
+`yMin` / `yMax` / `expRad`.
 
 ## Development
 

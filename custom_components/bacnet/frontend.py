@@ -1,7 +1,7 @@
-"""Automatic registration of the bundled Lovelace card.
+"""Automatic registration of the bundled Lovelace cards.
 
-Installing the integration is enough to make the BACnet schedule card available
-in the dashboard: the JavaScript module is served by Home Assistant itself and
+Installing the integration is enough to make the BACnet cards (schedule editor,
+heating circuit) available in the dashboard: each JavaScript module is served by Home Assistant itself and
 registered as a *persistent* Lovelace resource (the same mechanism HACS uses).
 
 Persistence matters: the previous approach (``add_extra_js_url``) only lives in
@@ -30,9 +30,11 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# Public URL the card is served from, and the file shipped inside the package.
-CARD_FILENAME = "bacnet-schedule-card.js"
-CARD_URL_PATH = f"/{DOMAIN}/{CARD_FILENAME}"
+# Card modules shipped inside the package; each is served at /bacnet/<file>.
+CARD_FILENAMES = (
+    "bacnet-schedule-card.js",
+    "bacnet-heating-circuit-card.js",
+)
 _LOVELACE_DIR = os.path.join(os.path.dirname(__file__), "lovelace")
 
 _REGISTERED_KEY = f"{DOMAIN}_frontend_registered"
@@ -53,25 +55,34 @@ async def _async_integration_version(hass: HomeAssistant) -> str:
 
 
 async def async_register_card(hass: HomeAssistant) -> None:
-    """Serve the card file and register it with the frontend once.
+    """Serve the card files and register them with the frontend once.
 
     Must be called *before* anything in the entry setup that can raise
-    ``ConfigEntryNotReady``: the card has to stay available on dashboards even
-    while the BACnet stack itself is still retrying.
+    ``ConfigEntryNotReady``: the cards have to stay available on dashboards
+    even while the BACnet stack itself is still retrying.
     """
     if hass.data.get(_REGISTERED_KEY):
         return
 
-    card_path = os.path.join(_LOVELACE_DIR, CARD_FILENAME)
+    # Append a version query string so browsers reload the cards after upgrades.
+    version = await _async_integration_version(hass)
+    for filename in CARD_FILENAMES:
+        await _async_register_one(hass, filename, version)
+    hass.data[_REGISTERED_KEY] = True
+
+
+async def _async_register_one(
+    hass: HomeAssistant, filename: str, version: str
+) -> None:
+    """Serve one card module and register it as a Lovelace resource."""
+    card_path = os.path.join(_LOVELACE_DIR, filename)
     if not await hass.async_add_executor_job(os.path.isfile, card_path):
         _LOGGER.warning("Lovelace card file missing at %s", card_path)
         return
 
-    await _async_serve_card(hass, card_path)
-
-    # Append a version query string so browsers reload the card after upgrades.
-    version = await _async_integration_version(hass)
-    versioned_url = f"{CARD_URL_PATH}?v={version}"
+    url_path = f"/{DOMAIN}/{filename}"
+    await _async_serve_card(hass, url_path, card_path)
+    versioned_url = f"{url_path}?v={version}"
 
     if await _async_register_lovelace_resource(hass, versioned_url):
         _LOGGER.debug("BACnet card registered as a Lovelace resource")
@@ -88,8 +99,7 @@ async def async_register_card(hass: HomeAssistant) -> None:
 
             hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry)
 
-    hass.data[_REGISTERED_KEY] = True
-    _LOGGER.info("BACnet schedule card served at %s", CARD_URL_PATH)
+    _LOGGER.info("BACnet card served at %s", url_path)
 
 
 async def _async_register_lovelace_resource(
@@ -142,7 +152,9 @@ def _resource_collection(hass: HomeAssistant):
     return resources
 
 
-async def _async_serve_card(hass: HomeAssistant, card_path: str) -> None:
+async def _async_serve_card(
+    hass: HomeAssistant, url_path: str, card_path: str
+) -> None:
     """Register the static path, supporting both new and old HA APIs."""
     # Newer HA (2024.7+): async bulk registration.
     register_async = getattr(hass.http, "async_register_static_paths", None)
@@ -151,7 +163,7 @@ async def _async_serve_card(hass: HomeAssistant, card_path: str) -> None:
             from homeassistant.components.http import StaticPathConfig
 
             await register_async(
-                [StaticPathConfig(CARD_URL_PATH, card_path, False)]
+                [StaticPathConfig(url_path, card_path, False)]
             )
             return
         except RuntimeError:
@@ -164,7 +176,7 @@ async def _async_serve_card(hass: HomeAssistant, card_path: str) -> None:
     register_sync = getattr(hass.http, "register_static_path", None)
     if register_sync is not None:
         try:
-            register_sync(CARD_URL_PATH, card_path, False)
+            register_sync(url_path, card_path, False)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Could not serve the BACnet card file: %s", err)
     else:

@@ -619,6 +619,7 @@ class BACnetOptionsFlow(OptionsFlow):
                         inactive_text=obj.inactive_text,
                         tree_path=obj.tree_path,
                         equipment_index=obj.equipment_index,
+                        bacnet_name=obj.name,
                     )
                 )
             device.points = points

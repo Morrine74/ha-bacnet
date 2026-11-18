@@ -102,6 +102,8 @@ class BACnetEntity(CoordinatorEntity[BACnetCoordinator]):
             "object_type": self._point.object_type,
             "cov": self._point.use_cov,
         }
+        if self._point.bacnet_name:
+            attrs["object_name"] = self._point.bacnet_name
         if self._point.description:
             attrs["description"] = self._point.description
         if self._point.tree_path:

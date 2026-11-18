@@ -32,6 +32,10 @@ CONF_ACTIVE_TEXT: Final = "active_text"
 CONF_INACTIVE_TEXT: Final = "inactive_text"
 CONF_TREE_PATH: Final = "tree_path"
 CONF_EQUIPMENT_INDEX: Final = "equipment_index"
+# Raw BACnet object-name (``Gym'LT'HCrt'Pu'Cmd``). CONF_OBJECT_NAME holds the
+# display name, which prefers the description; the raw name carries the
+# language-independent Siemens short names the heating circuit card binds on.
+CONF_BACNET_NAME: Final = "bacnet_name"
 # Options-flow form field: check the device answers at a new address.
 CONF_VERIFY_ADDRESS: Final = "verify_address"
 
