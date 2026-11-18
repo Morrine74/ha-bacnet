@@ -175,9 +175,11 @@ integration creates per Siemens installation (*Circuit de chauffage*, …):
 - **Hydraulic synoptic** — supply / return pipes, mixing valve position,
   single or twin pump (running, stopped, fault), supply / return temperatures
   and the current supply setpoint. Colours swap when the circuit is cooling.
-- **Heating curve** — drawn from its base / inflexion / high points, with the
-  min / max supply limits and the current operating point (outside temperature
-  → supply setpoint). Click a point to change its two coordinates.
+- **Heating curve** — drawn between its two ends (base and high outside
+  temperature), with the min / max supply limits and the current operating
+  point (outside temperature → supply setpoint). Click an end to change its
+  two coordinates. The inflexion point is computed by the controller: it is
+  shown read-only, and only when it lies between the two ends.
   A heating/cooling circuit has one curve per supply chain (hot water,
   chilled water): each is drawn on its own, with a Heating / Cooling toggle.
 - **Settings** — operating mode, room setpoints, heating limits, curve

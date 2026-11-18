@@ -7,8 +7,9 @@
  *
  *   - a hydraulic synoptic: supply / return pipes, mixing valve, pump(s),
  *     supply / return temperatures and the current supply setpoint;
- *   - the heating curve, drawn from its base / inflexion / high points, with
- *     the current operating point; a point is edited by clicking it;
+ *   - the heating curve, drawn between its base and high points (the
+ *     inflexion point is computed by the controller, hence read-only), with
+ *     the current operating point; an end is edited by clicking it;
  *   - the operating mode, room setpoints and heating limits, writable in a
  *     two-step dialog (enter, then confirm) so nothing is written by accident;
  *   - every remaining point of the installation under "Other points".
@@ -612,6 +613,9 @@ class BacnetHeatingCircuitCard extends HTMLElement {
     for (const key of curveKeys) {
       cv[key] = role(key, (p) => !branchNames.length || p.branch === branches[shown]);
     }
+    // The curve is set by its two ends (base and high outside temperature);
+    // the inflexion point is worked out by the controller: read-only here.
+    for (const p of [cv.xBp, cv.yBp]) if (p) p.writable = false;
     const curveRows = [cv.xBase, cv.yBase, cv.xBp, cv.yBp, cv.xHi, cv.yHi,
       cv.yMin, cv.yMax, cv.expRad, cv.tOaBase, cv.spTR];
     lists.push(list(this._t("curveSettings"), curveRows));
@@ -641,11 +645,22 @@ class BacnetHeatingCircuitCard extends HTMLElement {
         editable: px.writable || py.writable,
       };
     };
-    const pts = [
+    // X1 / X2 of the curve are the base and high outside temperatures. The
+    // inflexion point is a value computed by the controller: it is only
+    // drawn (never edited) when it really lies between the two ends.
+    const ends = [
       pair(cv.xBase, cv.yBase, this._t("base"), "base"),
-      pair(cv.xBp, cv.yBp, this._t("bp"), "bp"),
       pair(cv.xHi, cv.yHi, this._t("hi"), "hi"),
     ].filter(Boolean);
+    const bp = pair(cv.xBp, cv.yBp, this._t("bp"), "bp calc");
+    const pts = ends.slice();
+    if (bp) {
+      bp.editable = false;
+      const xs = ends.filter((p) => !p.partial).map((p) => p.x);
+      const inside = xs.length === 2 && !bp.partial &&
+        bp.x > Math.min(...xs) && bp.x < Math.max(...xs);
+      if (inside || !ends.length) pts.push(bp);
+    }
     if (!pts.length) return null;
     pts.sort((a, b) => (a.x == null ? -1e9 : a.x) - (b.x == null ? -1e9 : b.x));
     const full = pts.filter((p) => !p.partial);
@@ -946,7 +961,7 @@ device: &lt;device id&gt;</pre>`;
       <g class="cpt ${p.cls} ${p.editable ? "rw" : ""}" data-cpt="${i}">
         <title>${hcEsc(p.label)} — ${hcEsc(this._dis(p.px))} → ${hcEsc(this._dis(p.py))}</title>
         <circle cx="${f(p.sx)}" cy="${f(p.sy)}" r="13" class="hit"/>
-        <circle cx="${f(p.sx)}" cy="${f(p.sy)}" r="6"/>
+        <circle cx="${f(p.sx)}" cy="${f(p.sy)}" r="${p.editable ? 6 : 3.5}"/>
         <text x="${f(p.sx)}" y="${f(p.sy - 11)}" class="cpt-l">${hcEsc(p.partial ? p.label + " ?" : p.label)}</text>
       </g>`).join("");
     let cur = "";
@@ -1364,6 +1379,8 @@ const HC_STYLE = `
   .cpt .hit { fill: transparent; stroke: none; }
   .cpt.rw:hover circle:not(.hit) { fill: var(--hc-sup); }
   .cpt-l { font-size: 10.5px; font-weight: 600; text-anchor: middle; }
+  .cpt.calc circle:not(.hit) { stroke-width: 1.5; }
+  .cpt.calc .cpt-l { font-size: 9.5px; font-weight: 400; fill: var(--secondary-text-color); }
   /* Halo: labels stay readable where they cross the curve or a limit line. */
   .cpt-l, .cur-t, .lim text { paint-order: stroke; stroke: var(--card-background-color, #fff); stroke-width: 3px; stroke-linejoin: round; }
   .cur-l { stroke: var(--hc-sp); stroke-width: 1.2; stroke-dasharray: 3 3; }
