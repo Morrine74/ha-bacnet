@@ -864,9 +864,7 @@ device: &lt;device id&gt;</pre>`;
       <g class="pump ${pu.on ? "on" : "off"} ${pu.fault ? "fault" : ""}" data-pt="${hcEsc(pu.cmd.id)}">
         <title>${hcEsc(pu.cmd.leaf)} : ${hcEsc(this._dis(pu.cmd))}${pu.flt ? " — " + hcEsc(pu.flt.leaf) + " : " + hcEsc(this._dis(pu.flt)) : ""}</title>
         <circle cx="${cx}" cy="150" r="${s.pumps.length > 1 ? 12 : 16}" class="pump-body"/>
-        <g class="imp" style="transform-origin:${cx}px 150px">
-          <path d="M${cx} ${150 - 8} L${cx + 7} ${150 + 5} H${cx - 7} Z"/>
-        </g>
+        <path class="dir" d="M${cx} ${150 - 8} L${cx + 7} ${150 + 5} H${cx - 7} Z"/>
       </g>`;
     let pumps = "";
     if (s.pumps.length === 1) {
@@ -1324,7 +1322,6 @@ const HC_STYLE = `
   .flow { fill: none; stroke: #fff; stroke-opacity: .65; stroke-width: 2.5; stroke-linecap: round;
     stroke-dasharray: 1 15; animation: hc-flow 1.1s linear infinite; }
   @keyframes hc-flow { to { stroke-dashoffset: -16; } }
-  @keyframes hc-spin { to { transform: rotate(360deg); } }
   .arrow { fill: var(--primary-text-color, #212121); opacity: .75; }
   .rad rect { fill: var(--secondary-background-color, #f5f5f5); stroke: var(--secondary-text-color, #727272); stroke-width: 1.5; }
   .rad path { stroke: var(--secondary-text-color, #727272); stroke-width: 1.5; fill: none; opacity: .6; }
@@ -1335,10 +1332,11 @@ const HC_STYLE = `
   .twin { fill: var(--card-background-color, #fff); stroke: var(--primary-text-color, #212121); stroke-width: 1.6; }
   .twin.fault { stroke: var(--error-color, #d72339); stroke-width: 3; }
   .pump-body { fill: var(--card-background-color, #fff); stroke: var(--primary-text-color, #212121); stroke-width: 1.6; }
-  .pump .imp path { fill: var(--secondary-text-color, #727272); }
+  /* The triangle is the pump symbol's flow direction: it never moves. A
+     running pump is told by its green body and by the flow in the pipes. */
+  .pump .dir { fill: var(--secondary-text-color, #727272); }
   .pump.on .pump-body { fill: var(--hc-on); }
-  .pump.on .imp path { fill: #fff; }
-  .pump.on .imp { animation: hc-spin 1.6s linear infinite; }
+  .pump.on .dir { fill: #fff; }
   .pump.fault .pump-body { stroke: var(--error-color, #d72339); stroke-width: 3.5; }
   .lbl { font-size: 11px; font-weight: 600; }
   .lbl.alarm { fill: var(--error-color, #d72339); }
@@ -1412,7 +1410,7 @@ const HC_STYLE = `
   .btn.primary.warn { border-color: var(--warning-color, #c75300); background: var(--warning-color, #c75300); }
   .btn:disabled { opacity: .5; cursor: default; }
   :is(button, [data-pt], [data-cpt]):focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 1px; }
-  @media (prefers-reduced-motion: reduce) { .flow, .pump.on .imp { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
 `;
 
 // Guard against double definition (the versioned ?v= URL may load the module
